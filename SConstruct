@@ -38,6 +38,8 @@ build('src/librender/SConscript')
 build('src/libhw/SConscript')
 # Bidirectional support library
 build('src/libbidir/SConscript')
+# Layered reflectance support library
+build('src/liblayer/SConscript')
 # Python binding library
 build('src/libpython/SConscript')
 

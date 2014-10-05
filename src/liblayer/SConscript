@@ -1,0 +1,24 @@
+Import('env', 'sys', 'os')
+
+layerEnv = env.Clone()
+layerEnv.Append(CPPDEFINES = [['MTS_BUILD_MODULE', 'MTS_MODULE_LAYER']])
+
+if layerEnv.has_key('FFTWLIBDIR'):
+	layerEnv.Prepend(LIBPATH=env['FFTWLIBDIR'])
+if layerEnv.has_key('FFTWINCLUDE'):
+	layerEnv.Prepend(CPPPATH=env['FFTWINCLUDE'])
+if layerEnv.has_key('FFTWLIB'):
+	layerEnv.Prepend(LIBS=env['FFTWLIB'])
+
+env.Append(LIBPATH=[os.path.join(env['BUILDDIR'], 'liblayer')])
+
+if 'darwin' in sys.platform:
+    layerEnv.Append(CXXFLAGS=['-D', 'MTS_HAS_LAPACK', '-I', '/System/Library/Frameworks/vecLib.framework/Headers'], LINKFLAGS=['-framework', 'Accelerate'])
+elif 'linux' in sys.platform:
+    layerEnv.Append(CXXFLAGS=['-D', 'MTS_HAS_LAPACK'], LIBS=['-llapacke'])
+
+liblayer = layerEnv.SharedLibrary('mitsuba-layer', [
+	'fourier.cpp', 'microfacet.cpp', 'storage.cpp', 'hg.cpp', 'layer.cpp', 'hrex.cpp'
+])
+if 'darwin' in sys.platform:
+	layerEnv.AddPostAction(liblayer, 'install_name_tool -id @rpath/libmitsuba-layer.dylib $TARGET')

@@ -783,6 +783,31 @@ namespace {
 	inline Float fresnelDiffuseIntegrand(Float eta, Float xi) {
 		return fresnelDielectricExt(std::sqrt(xi), eta);
 	}
+
+	inline Float fresnelDiffuseIntegrandConductor(Float eta, Float k, Float xi) {
+		Float cosThetaI = std::sqrt(xi);
+
+		/* Modified from "Optics" by K.D. Moeller, University Science Books, 1988 */
+		Float cosThetaI2 = cosThetaI*cosThetaI,
+			  sinThetaI2 = 1-cosThetaI2,
+			  sinThetaI4 = sinThetaI2*sinThetaI2;
+
+		Float temp1 = eta*eta - k*k - sinThetaI2,
+		      a2pb2 = math::safe_sqrt(temp1*temp1 + k*k*eta*eta*4),
+		      a     = math::safe_sqrt((a2pb2 + temp1) * 0.5f);
+
+		Float term1 = a2pb2 + cosThetaI2,
+		      term2 = a*(2*cosThetaI);
+
+		Float Rs2 = (term1 - term2) / (term1 + term2);
+
+		Float term3 = a2pb2*cosThetaI2 + sinThetaI4,
+				 term4 = term2*sinThetaI2;
+
+		Float Rp2 = Rs2 * (term3 - term4) / (term3 + term4);
+
+		return 0.5f * (Rp2 + Rs2);
+	}
 };
 
 Float fresnelDiffuseReflectance(Float eta, bool fast) {
@@ -833,6 +858,12 @@ Float fresnelDiffuseReflectance(Float eta, bool fast) {
 	}
 
 	return 0.0f;
+}
+
+Float fresnelDiffuseConductor(Float eta, Float k) {
+	GaussLobattoIntegrator quad(1024, 0, 1e-5f);
+	return quad.integrate(
+		boost::bind(&fresnelDiffuseIntegrandConductor, eta, k, _1), 0, 1);
 }
 
 std::string timeString(Float time, bool precise) {

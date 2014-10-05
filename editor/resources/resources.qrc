@@ -1,0 +1,16 @@
+<RCC>
+  <qresource prefix="/resources/">
+    <file>appicon.png</file>
+    <file>add.png</file>
+    <file>remove.png</file>
+    <file>open.png</file>
+    <file>go.png</file>
+    <file>save.png</file>
+    <file>saveas.png</file>
+    <file>open.png</file>
+    <file>close.png</file>
+    <file>busy.mng</file>
+    <file>busy.png</file>
+    <file>bookmark.png</file>
+  </qresource>
+</RCC>

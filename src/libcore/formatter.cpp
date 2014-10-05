@@ -63,8 +63,12 @@ std::string DefaultFormatter::format(ELogLevel logLevel, const Class *theClass,
 	if (m_haveClass) {
 		if (theClass)
 			oss << "[" << theClass->getName() << "] ";
-		else if (line != -1 && file)
-			oss << "[" << fs::path(file).filename().string() << ":" << line << "] ";
+		else if (file) {
+			oss << "[" << fs::path(file).filename().string();
+			if (line != -1)
+				oss << ":" << line;
+			oss << "] ";
+		}
 	}
 
 	/* Text */

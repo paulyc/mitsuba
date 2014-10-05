@@ -110,6 +110,9 @@ namespace warp {
 	/// Density of \ref squareToStdNormal per unit area
 	extern MTS_EXPORT_CORE Float squareToStdNormalPdf(const Point2 &pos);
 
+	/// Generate a 1D standard normal sample
+	extern MTS_EXPORT_CORE Float intervalToStdNormal(Float xi);
+
 	/// Warp a uniformly distributed square sample to a 2D tent distribution
 	extern MTS_EXPORT_CORE Point2 squareToTent(const Point2 &sample);
 

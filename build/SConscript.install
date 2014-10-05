@@ -47,7 +47,8 @@ if 'linux' in sys.platform:
 	for plugin in plugins:
 		installTargets += env.Install(os.path.join(distDir, 'plugins'), plugin)
 	install(distDir, ['libcore/libmitsuba-core.so', 'libhw/libmitsuba-hw.so',
-			'librender/libmitsuba-render.so', 'libbidir/libmitsuba-bidir.so'])
+			'librender/libmitsuba-render.so', 'libbidir/libmitsuba-bidir.so',
+            'liblayer/libmitsuba-layer.so'])
 	for ver in hasPython:
 		installAs(os.path.join(distDir, 'python/'+ver+'/mitsuba.so'), 'libpython/mitsuba_python' + ver + '.so')
 	install(distDir, ['mitsuba/mitsuba', 'mitsuba/mtssrv', 'mitsuba/mtsutil'])
@@ -71,9 +72,9 @@ if sys.platform == 'win32':
 
 	install(distDir, ['mitsuba/mitsuba.exe', 'mitsuba/mtssrv.exe', 'mitsuba/mtsutil.exe'])
 	install(distDir, ['libcore/libmitsuba-core.dll', 'libhw/libmitsuba-hw.dll',
-			'librender/libmitsuba-render.dll', 'libbidir/libmitsuba-bidir.dll'])
+			'librender/libmitsuba-render.dll', 'libbidir/libmitsuba-bidir.dll', 'liblayer/libmitsuba-layer.dll'])
 	install(sdkLibDir, ['libcore/mitsuba-core.lib', 'libhw/mitsuba-hw.lib',
-			'librender/mitsuba-render.lib', 'libbidir/mitsuba-bidir.lib'])
+			'librender/mitsuba-render.lib', 'libbidir/mitsuba-bidir.lib', 'liblayer/mitsuba-layer.lib'])
 	for entry in os.walk(os.path.join(basePath, "include")):
 		includeDir = entry[0][len(basePath)+1:]
 		installTargets += env.Install(os.path.join(sdkDir, includeDir),
@@ -123,7 +124,7 @@ elif sys.platform == 'darwin':
 	frameworkDir = os.path.join(distDir, 'Contents/Frameworks')
 
 	install(frameworkDir, ['libcore/libmitsuba-core.dylib', 'libhw/libmitsuba-hw.dylib',
-		'librender/libmitsuba-render.dylib', 'libbidir/libmitsuba-bidir.dylib'])
+		'librender/libmitsuba-render.dylib', 'libbidir/libmitsuba-bidir.dylib', 'liblayer/libmitsuba-layer.dylib'])
 	for ver in hasPython:
 		installTargets += installAs(os.path.join(distDir, 'python/'+ver+'/mitsuba.so'), 'libpython/mitsuba_python'+ver+'.dylib')
 	for entry in os.walk(os.path.join(basePath, "dependencies/lib")):

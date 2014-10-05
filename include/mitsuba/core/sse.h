@@ -45,7 +45,7 @@
 #define disable_fpexcept_sse()
 #else
 /* Include SSE intrinsics header file */
-#include <emmintrin.h>
+#include <pmmintrin.h>
 /* MSVC intrinsics header (for RDTSC) */
 #if defined(__MSVC__)
 # include <intrin.h>

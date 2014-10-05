@@ -1581,7 +1581,7 @@ ref<Bitmap> Bitmap::convert(EPixelFormat pixelFormat,
 			m_channelCount);
 	target->setMetadata(m_metadata);
 	if (m_channelNames.size() == (size_t) target->getChannelCount())
-		target->setChannelNames(m_channelNames);
+	target->setChannelNames(m_channelNames);
 	target->setGamma(gamma);
 
 	cvt->convert(m_pixelFormat, m_gamma, m_data,
@@ -2253,25 +2253,25 @@ template <typename Scalar> static void resample(ref<const ReconstructionFilter> 
 		/* Create a bitmap for intermediate storage */
 		if (!temp) {
 			if (source->getHeight() == target->getHeight() && !filter)
-				temp = target; // write directly to the output bitmap
-			else // otherwise: write to a temporary bitmap
-				temp = new Bitmap(source->getPixelFormat(), source->getComponentFormat(),
-					Vector2i(target->getWidth(), source->getHeight()), channels);
+			temp = target; // write directly to the output bitmap
+		else // otherwise: write to a temporary bitmap
+			temp = new Bitmap(source->getPixelFormat(), source->getComponentFormat(),
+				Vector2i(target->getWidth(), source->getHeight()), channels);
 		}
 
 		if (clamp) {
-			#if defined(MTS_OPENMP)
-				#pragma omp parallel for
-			#endif
-			for (int y=0; y<source->getHeight(); ++y) {
-				const Scalar *srcPtr = (Scalar *) source->getUInt8Data()
-					+ y * source->getWidth() * channels;
-				Scalar *trgPtr = (Scalar *) temp->getUInt8Data()
-					+ y * target->getWidth() * channels;
+		#if defined(MTS_OPENMP)
+			#pragma omp parallel for
+		#endif
+		for (int y=0; y<source->getHeight(); ++y) {
+			const Scalar *srcPtr = (Scalar *) source->getUInt8Data()
+				+ y * source->getWidth() * channels;
+			Scalar *trgPtr = (Scalar *) temp->getUInt8Data()
+				+ y * target->getWidth() * channels;
 
-				r.resampleAndClamp(srcPtr, 1, trgPtr, 1, channels,
-						safe_cast<Scalar>(minValue), safe_cast<Scalar>(maxValue));
-			}
+			r.resampleAndClamp(srcPtr, 1, trgPtr, 1, channels,
+					safe_cast<Scalar>(minValue), safe_cast<Scalar>(maxValue));
+		}
 		} else {
 			#if defined(MTS_OPENMP)
 				#pragma omp parallel for
@@ -2295,16 +2295,16 @@ template <typename Scalar> static void resample(ref<const ReconstructionFilter> 
 		Resampler<Scalar> r(rfilter, bcv, source->getHeight(), target->getHeight());
 
 		if (clamp) {
-			#if defined(MTS_OPENMP)
-				#pragma omp parallel for
-			#endif
-			for (int x=0; x<source->getWidth(); ++x) {
-				const Scalar *srcPtr = (Scalar *) source->getUInt8Data() + x * channels;
-				Scalar *trgPtr = (Scalar *) target->getUInt8Data() + x * channels;
+		#if defined(MTS_OPENMP)
+			#pragma omp parallel for
+		#endif
+		for (int x=0; x<source->getWidth(); ++x) {
+			const Scalar *srcPtr = (Scalar *) source->getUInt8Data() + x * channels;
+			Scalar *trgPtr = (Scalar *) target->getUInt8Data() + x * channels;
 
-				r.resampleAndClamp(srcPtr, source->getWidth(), trgPtr, target->getWidth(),
-					channels, safe_cast<Scalar>(minValue), safe_cast<Scalar>(maxValue));
-			}
+			r.resampleAndClamp(srcPtr, source->getWidth(), trgPtr, target->getWidth(),
+				channels, safe_cast<Scalar>(minValue), safe_cast<Scalar>(maxValue));
+		}
 		} else {
 			#if defined(MTS_OPENMP)
 				#pragma omp parallel for
@@ -2831,9 +2831,9 @@ void Bitmap::readOpenEXR(Stream *stream, const std::string &_prefix) {
 				if (_prefix == "*")
 					multichannel = true;
 				else
-					Log(EWarn, "readOpenEXR(): Don't know what to do with the channel named '%s'", it.name());
-			}
+				Log(EWarn, "readOpenEXR(): Don't know what to do with the channel named '%s'", it.name());
 		}
+	}
 	}
 
 	bool spectral = true, specialColorProcessing = false,

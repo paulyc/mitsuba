@@ -28,10 +28,15 @@ plugins += env.SharedLibrary('hk', ['hk.cpp'])
 plugins += env.SharedLibrary('null', ['null.cpp'])
 plugins += env.SharedLibrary('thindielectric', ['thindielectric.cpp'])
 
+layerEnv = env.Clone()
+layerEnv.Append(LIBS=['mitsuba-layer'])
+layerEnv.Append(LIBPATH=['#src/liblayer'])
+plugins += layerEnv.SharedLibrary('tabulated', ['tabulated.cpp'])
+
 # The Irawan-Marschner plugin uses a Boost::Spirit parser, which makes it
 # pretty heavy stuff to compile. Go easy on the compiler flags:
 irawanEnv = env.Clone()
 irawanEnv.RelaxCompilerSettings()
-plugins += irawanEnv.SharedLibrary('irawan', ['irawan.cpp'])
+#plugins += irawanEnv.SharedLibrary('irawan', ['irawan.cpp'])
 
 Export('plugins')

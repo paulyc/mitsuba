@@ -363,9 +363,7 @@ static void mts_log(ELogLevel level, const std::string &msg) {
 	std::string module = bp::extract<std::string>(top[2]);
 	Thread::getThread()->getLogger()->log(level,
 		NULL, bp::extract<const char *>(top[0]),
-		bp::extract<int>(top[1]), "%s%s: %s",
-		module.c_str(), module[0] == '<' ? "" : "()",
-		msg.c_str());
+		-1, "%s", msg.c_str());
 }
 
 class FormatterWrapper : public Formatter {
@@ -2551,4 +2549,5 @@ BOOST_PYTHON_MODULE(mitsuba) {
 
 	export_core();
 	export_render();
+	export_layer();
 }

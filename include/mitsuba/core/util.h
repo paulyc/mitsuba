@@ -553,6 +553,16 @@ extern MTS_EXPORT_CORE Float fresnelDiffuseReflectance(
 	Float eta, bool fast = false);
 
 /**
+ * \brief Calculates the diffuse unpolarized Fresnel reflectance of
+ * a conducting material
+ *
+ * This value quantifies what fraction of diffuse incident illumination
+ * will, on average, be reflected at a material boundary
+ */
+
+extern MTS_EXPORT_CORE Float fresnelDiffuseConductor(Float eta, Float k);
+
+/**
  * \brief Specularly reflect direction \c wi with respect to the given surface normal
  * \param wi
  *     Incident direction
