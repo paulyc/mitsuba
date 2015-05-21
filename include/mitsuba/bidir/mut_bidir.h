@@ -35,7 +35,7 @@ MTS_NAMESPACE_BEGIN
  * \author Wenzel Jakob
  * \ingroup libbidir
  */
-class MTS_EXPORT_BIDIR BidirectionalMutator : public Mutator {
+class MTS_EXPORT_BIDIR BidirectionalMutator : public MutatorBase {
 public:
 	/**
 	 * \brief Construct a new bidirectional mutator
@@ -83,10 +83,7 @@ protected:
 	/// Virtual destructor
 	virtual ~BidirectionalMutator();
 protected:
-	ref<const Scene> m_scene;
-	ref<Sampler> m_sampler;
 	std::vector<int> m_temp;
-	MemoryPool &m_pool;
 	int m_kmin, m_kmax;
 	Path m_tempPath;
 };

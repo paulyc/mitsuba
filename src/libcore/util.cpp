@@ -609,11 +609,11 @@ void computeShadingFrame(const Vector &n, const Vector &dpdu, Frame &frame) {
 
 void computeShadingFrameDerivative(const Vector &n, const Vector &dpdu, const Vector &dndu, const Vector &dndv, Frame &du, Frame &dv) {
 	Vector s = dpdu - n * dot(n, dpdu);
-	Float invLen_s = 1.0f / s.length();
+	const Float invLen_s = 1.0f / s.length();
 	s *= invLen_s;
 
-	du.s = invLen_s * (-dndu * dot(n, dpdu) - n * dot(dndu, dpdu));
-	dv.s = invLen_s * (-dndv * dot(n, dpdu) - n * dot(dndv, dpdu));
+	du.s = (-dndu * dot(n, dpdu) - n * dot(dndu, dpdu)) * invLen_s;
+	dv.s = (-dndv * dot(n, dpdu) - n * dot(dndv, dpdu)) * invLen_s;
 
 	du.s -= s * dot(du.s, s);
 	dv.s -= s * dot(dv.s, s);

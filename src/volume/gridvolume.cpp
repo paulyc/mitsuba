@@ -214,18 +214,7 @@ public:
 		m_densityMap[255] = 1.0f;
 	}
 
-	void loadFromFile(const fs::path &filename) {
-		m_filename = filename;
-		fs::path resolved = Thread::getThread()->getFileResolver()->resolve(filename);
-		m_mmap = new MemoryMappedFile(resolved);
-		ref<MemoryStream> stream = new MemoryStream(m_mmap->getData(), m_mmap->getSize());
-		stream->setByteOrder(Stream::ELittleEndian);
-
-		char header[3];
-		stream->read(header, 3);
-		if (header[0] != 'V' || header[1] != 'O' || header[2] != 'L')
-			Log(EError, "Encountered an invalid volume data file "
-				"(incorrect header identifier)");
+	void loadVolFile(const fs::path &filename, ref<MemoryStream> stream) {
 		uint8_t version;
 		stream->read(&version, 1);
 		if (version != 3)
@@ -280,10 +269,194 @@ public:
 			m_dataAABB = AABB(Point(xmin, ymin, zmin), Point(xmax, ymax, zmax));
 		}
 
+		fs::path resolved = Thread::getThread()->getFileResolver()->resolve(filename);
 		Log(EDebug, "Mapped \"%s\" into memory: %ix%ix%i (%i channels, format = %s), %s, %s",
 			resolved.filename().string().c_str(), m_res.x, m_res.y, m_res.z, m_channels, format.c_str(),
 			memString(m_mmap->getSize()).c_str(), m_dataAABB.toString().c_str());
 		m_data = (uint8_t *) (((float *) m_mmap->getData()) + 12);
+	}
+
+  inline uint32_t byteSwap(const uint32_t v) { return 
+	(v>>24) |
+	((v&0x00ff0000)>>8) |
+	((v&0x0000ff00)<<8) |
+	((v&0x000000ff)<<24);
+  }
+
+#ifdef WIN32
+  inline double round(const double d)
+  {
+	return floor(d + 0.5);
+  }
+#endif
+
+  void loadMayaFile(const fs::path &filename, ref<MemoryStream> stream)
+  {
+	fs::path resolved = Thread::getThread()->getFileResolver()->resolve(filename);
+
+	uint32_t* data=NULL; const uint32_t* data_src=NULL;
+	uint32_t tag;
+	int res = 0, bufferLength = -1, bytesRead = 0, blockSize = 0, chnmSize, chnmSizeToRead
+		, paddingSize, arrayLength;
+	std::string channelName;
+
+	union {
+		unsigned int ui;
+		float f;
+	} val;
+
+	const int offset = byteSwap(stream->readInt());
+		
+	//The 1st block is the header, not used. 
+	stream->skip(offset);
+
+	// Check and get the block's size
+	tag = /*byteSwap*/(stream->readInt());
+	if(tag != *(uint32_t*)"FOR4")
+		goto failed_load;
+	blockSize = byteSwap(stream->readInt());
+	bytesRead = 0;
+
+	// Check for the channels magic number
+	tag = /*byteSwap*/(stream->readInt());
+	if(tag != *(uint32_t*)"MYCH")
+	  goto failed_load;
+	bytesRead += 4;
+
+	// Go through all channels in the block and find density
+	bufferLength = -1;
+	while(bytesRead < blockSize)
+	{
+	  // The next tag for channel name must be CHNM
+	  tag = /*byteSwap*/(stream->readInt());
+	  if(tag != *(uint32_t*)"CHNM")
+		goto failed_load;
+	  bytesRead += 4;
+			
+	  // Next comes a 32 bit int that tells us how long the channel name is
+	  chnmSize = byteSwap(stream->readInt());
+	  bytesRead += 4;
+			
+	  // The string is padded out to 32 bit boundaries,
+	  // so we may need to read more than chnmSize
+	  chnmSizeToRead = (chnmSize + 3) & (~3);
+	  channelName = stream->readString();
+	  paddingSize = chnmSizeToRead-chnmSize;
+	  if(paddingSize > 0)
+		  stream->skip(paddingSize);
+	  bytesRead += chnmSizeToRead;
+			
+	  // Next is the SIZE field, which tells us the length of the data array
+	  tag = /*byteSwap*/(stream->readInt());
+	  if(tag != *(uint32_t*)"SIZE")
+		goto failed_load;
+	  bytesRead += 4;
+			
+	  // Next 32 bit int is the size of the array size variable,
+	  // this is always 4, so we'll ignore it for now
+	  // though we could use it as a sanity check.
+	  stream->skip(4);
+	  bytesRead += 4;
+			
+	  // Finally the actual size of the array:
+	  arrayLength = byteSwap(stream->readInt());
+	  bytesRead += 4;
+			
+	  // Data format tag:
+	  tag = /*byteSwap*/(stream->readInt());
+	  // Buffer length - how many bytes is the actual data
+	  bufferLength = byteSwap(stream->readInt());
+	  bytesRead += 8;
+
+	  // Check only channels with 1 32-bit float channel
+	  if (tag == *(uint32_t*)"FBCA")
+	  {
+		if (bufferLength != arrayLength * 4)
+		  goto failed_load;
+		// Density channel has a suffix '_density' in Maya
+		//if(channelName.find("_density") == std::string::npos)
+		//{
+		//  bytesRead += bufferLength;
+		//  bufferLength = -1;
+		//  continue;
+		//}
+		break;
+	  }
+	  else
+	  {
+		goto failed_load;
+	  }
+	}
+
+	// Couldn't find density channel
+	if(bufferLength <= 0)
+	  goto failed_load;
+
+	// TODO: Assume so far that the grid is cubic
+	res = (int)round(std::pow((double)(bufferLength/4), 1./3));
+	if (bufferLength != res*res*res*4)
+	  goto failed_load;
+	m_res = Vector3i(res, res, res);
+
+	// Single-channel float density
+	m_channels = 1;
+	m_volumeType = (EVolumeType)EFloat32;
+
+	// Make it the same BBox as the Mitsuba's cube primitive for convenience
+	if (!m_dataAABB.isValid())
+	  m_dataAABB = AABB(Point(-0.5f, -0.5f, -0.5f), Point(0.5f, 0.5f, 0.5f));
+
+	Log(EDebug, "Loaded \"%s\": %ix%ix%i, channel '%s' (%i channels, %s, %s)",
+	  resolved.filename().string().c_str(), m_res.x, m_res.y, m_res.z, channelName.c_str(),
+		m_channels, memString(m_mmap->getSize()).c_str(), m_dataAABB.toString().c_str());
+
+	// Allocate new chunk of data
+	m_data = new uint8_t[bufferLength];
+
+	// Swizzling and clamping post-tweaks for Maya density
+	data = (uint32_t*)m_data;
+	data_src = (const uint32_t*)((const uint8_t *)m_mmap->getData() + stream->getPos());
+	for (int i = 0; i < bufferLength / 4; ++i)
+	{
+	  data[i] = byteSwap(data_src[i]);
+	  // Clamp to valid density values
+	  val.ui = data[i];
+	  val.f = math::clamp(val.f, 0.f, 1e18f);
+	  data[i] = val.ui;
+	}
+
+	return;
+
+  failed_load:
+	Log(EError, "Encountered a volume data file of unknown type!");
+  }
+
+	void loadFromFile(const fs::path &filename) {
+		m_filename = filename;
+		fs::path resolved = Thread::getThread()->getFileResolver()->resolve(filename);
+		m_mmap = new MemoryMappedFile(resolved);
+		ref<MemoryStream> stream = new MemoryStream(m_mmap->getData(), m_mmap->getSize());
+		stream->setByteOrder(Stream::ELittleEndian);
+
+		char header[3];
+		stream->read(header, 3);
+		if (header[0] == 'V' && header[1] == 'O' && header[2] == 'L')
+	{
+	  loadVolFile(filename, stream);
+	  return;
+	}
+	else if(header[0] == 'F' && header[1] == 'O' && header[2] == 'R') // Maya nCache binary file
+	{
+	  char header2;
+	  stream->read(&header2, 1);
+	  if(header2 == '4')
+	  {
+		loadMayaFile(filename, stream);
+		return;
+	  }
+	}
+		Log(EError, "Encountered an invalid volume data file "
+			"(incorrect header identifier)");
 	}
 
 	/**

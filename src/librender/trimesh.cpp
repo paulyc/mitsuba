@@ -751,9 +751,9 @@ void TriMesh::getNormalDerivative(const Intersection &its,
 
 		const Triangle &tri = m_triangles[its.primIndex];
 
-		uint32_t idx0 = tri.idx[0],
-				 idx1 = tri.idx[1],
-				 idx2 = tri.idx[2];
+		const uint32_t	idx0 = tri.idx[0],
+						idx1 = tri.idx[1],
+						idx2 = tri.idx[2];
 
 		const Point
 			&p0 = m_positions[idx0],
@@ -792,7 +792,7 @@ void TriMesh::getNormalDerivative(const Intersection &its,
 		*/
 
 		Normal N(u * n1 + v * n2 + w * n0);
-		Float il = 1.0f / N.length(); N *= il;
+		const Float il = 1.0f / N.length(); N *= il;
 
 		dndu = (n1 - n0) * il; dndu -= N * dot(N, dndu);
 		dndv = (n2 - n0) * il; dndv -= N * dot(N, dndv);

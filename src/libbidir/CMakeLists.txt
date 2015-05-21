@@ -12,6 +12,7 @@ set(HDRS
   ${INCLUDE_DIR}/mempool.h
   ${INCLUDE_DIR}/mut_bidir.h
   ${INCLUDE_DIR}/mut_caustic.h
+  ${INCLUDE_DIR}/mut_halfvector.h
   ${INCLUDE_DIR}/mut_lens.h
   ${INCLUDE_DIR}/mut_manifold.h
   ${INCLUDE_DIR}/mut_mchain.h
@@ -30,6 +31,7 @@ set(SRCS
   manifold.cpp
   mut_bidir.cpp
   mut_caustic.cpp
+  mut_halfvector.cpp
   mut_lens.cpp
   mut_manifold.cpp
   mut_mchain.cpp

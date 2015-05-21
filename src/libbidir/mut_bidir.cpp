@@ -28,9 +28,8 @@ static StatsCounter statsGenerated("Bidirectional mutation",
 		"Successful generation rate", EPercentage);
 
 BidirectionalMutator::BidirectionalMutator(const Scene *scene,
-	Sampler *sampler, MemoryPool &pool, int kmin, int kmax) :
-	m_scene(scene), m_sampler(sampler), m_pool(pool),
-	m_kmin(kmin), m_kmax(kmax) {
+	Sampler *sampler, MemoryPool &pool, int kmin, int kmax) : MutatorBase(scene, sampler, pool),
+		m_kmin(kmin), m_kmax(kmax) {
 }
 
 BidirectionalMutator::~BidirectionalMutator() { }

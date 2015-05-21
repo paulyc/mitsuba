@@ -76,9 +76,6 @@ protected:
 	/// Virtual destructor
 	virtual ~CausticPerturbation();
 protected:
-	ref<const Scene> m_scene;
-	ref<Sampler> m_sampler;
-	MemoryPool &m_pool;
 	Float m_theta1, m_theta2, m_logRatio;
 };
 

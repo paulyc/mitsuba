@@ -82,7 +82,7 @@ MTS_NAMESPACE_BEGIN
  * susceptible to unforeseen problems.
  * Mitsuba reproduces the full MLT
  * algorithm except for the lens subpath mutation\footnote{In experiments,
- * it was not found to produce sigificant convergence improvements and was
+ * it was not found to produce significant convergence improvements and was
  * subsequently removed.}. In addition, the plugin also provides the
  * manifold perturbation proposed by Jakob and Marschner \cite{Jakob2012Manifold}.
  *
@@ -121,6 +121,12 @@ MTS_NAMESPACE_BEGIN
  * a chain of specular interactions, it numerically solves for a
  * connection path (as opposed to the cascading mechanism employed by the
  * multi-chain perturbation).
+ * \item \emph{Half-vector perturbation}: this perturbation was designed to
+ * subsume and extend the previous approaches.
+ * It perturbs a path in its half-vector space, i.e. perturbs half-vector of a path
+ * and finds the corresponding existing path in object space.
+ * The advantages is that it naturally decouples the dimensions of the integrand
+ * allowing for improved glossy and forward-scattering transport.
  * \end{enumerate}
  */
 class MLT : public Integrator {
@@ -193,6 +199,9 @@ public:
 		/* Selectively enable/disable the manifold perturbation */
 		m_config.manifoldPerturbation = props.getBoolean("manifoldPerturbation", false);
 		m_config.probFactor = props.getFloat("probFactor", props.getFloat("lambda", 50));
+
+		/* Selectively enable/disable the half vector perturbation */
+		m_config.halfvectorPerturbation = props.getBoolean("halfvectorPerturbation", false);
 
 		/* Stop MLT after X seconds -- useful for equal-time comparisons */
 		m_config.timeout = props.getInteger("timeout", 0);
@@ -277,7 +286,7 @@ public:
 
 		size_t luminanceSamples = m_config.luminanceSamples;
 		if (luminanceSamples < (size_t) m_config.workUnits * 10) {
-			luminanceSamples = (size_t) m_config.workUnits * 10;
+			//luminanceSamples = (size_t) m_config.workUnits * 10;
 			Log(EWarn, "Warning: increasing number of luminance samples to " SIZE_T_FMT,
 				luminanceSamples);
 		}

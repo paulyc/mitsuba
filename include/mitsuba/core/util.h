@@ -142,6 +142,16 @@ extern MTS_EXPORT_CORE bool disableFPExceptions();
 /// Restore floating point exceptions to the specified state
 extern MTS_EXPORT_CORE void restoreFPExceptions(bool state);
 
+struct setFPExceptionsScope {
+	bool oldState;
+	explicit setFPExceptionsScope(const bool enabled) {
+		oldState = enabled ? enableFPExceptions() : disableFPExceptions();
+	}
+	~setFPExceptionsScope() {
+		restoreFPExceptions(oldState);
+	}
+};
+
 /// Cast between types that have an identical binary representation.
 template<typename T, typename U> inline T union_cast(const U &val) {
 	BOOST_STATIC_ASSERT(sizeof(T) == sizeof(U));

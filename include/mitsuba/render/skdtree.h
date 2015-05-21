@@ -71,6 +71,7 @@ class MTS_EXPORT_RENDER ShapeKDTree : public SAHKDTree3D<ShapeKDTree> {
 	friend class SAHKDTree3D<ShapeKDTree>;
 	friend class Instance;
 	friend class AnimatedInstance;
+	friend class TriMesh;
 public:
 	// =============================================================
 	//! @{ \name Initialization and tree construction
@@ -191,6 +192,9 @@ public:
 	//! @}
 	// =============================================================
 
+  /* Debug visualization data */
+  mutable void*   m_visData;
+
 	MTS_DECLARE_CLASS()
 protected:
 	/**
@@ -207,7 +211,7 @@ protected:
 		return (IndexType) (it - m_shapeMap.begin());
 	}
 
- 	/// Return the axis-aligned bounding box of a certain primitive
+	/// Return the axis-aligned bounding box of a certain primitive
 	FINLINE AABB getAABB(IndexType idx) const {
 		IndexType shapeIdx = findShape(idx);
 		const Shape *shape = m_shapes[shapeIdx];
@@ -219,7 +223,7 @@ protected:
 		}
 	}
 
- 	/// Return the AABB of a primitive when clipped to another AABB
+	/// Return the AABB of a primitive when clipped to another AABB
 	FINLINE AABB getClippedAABB(IndexType idx, const AABB &aabb) const {
 		IndexType shapeIdx = findShape(idx);
 		const Shape *shape = m_shapes[shapeIdx];

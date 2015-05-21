@@ -200,6 +200,7 @@ struct SceneContext {
 	bool diffuseReceivers;
 	bool showKDTree;
 	int shownKDTreeLevel;
+	bool showDebugVis;
 	ESelectionMode selectionMode;
 	const Shape *selectedShape;
 	Vector2i originalSize;

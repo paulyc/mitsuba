@@ -63,15 +63,22 @@ Float BSDF::getEta() const {
 	return 1.0f;
 }
 
-Frame BSDF::getFrame(const Intersection &its) const {
-	Frame result;
+void BSDF::getFrame(const Intersection &its, Frame &result) const {
 	computeShadingFrame(its.shFrame.n, its.dpdu, result);
-	return result;
 }
 
 void BSDF::getFrameDerivative(const Intersection &its, Frame &du, Frame &dv) const {
+	const Shape *sh = (its.instance ? its.instance : its.shape);
+	/* If the BSDF is smooth and is on a triangle mesh, check if the mesh has a uv mapping */
+	if((getType() & BSDF::ESmooth) && sh->getClass()->derivesFrom(MTS_CLASS(TriMesh))) {
+		const TriMesh* mesh = static_cast<const TriMesh*>(sh);
+		if(!mesh->hasUVTangents()) {
+			// Log(EError, "Trying to compute derivatives of a triangle mesh without uv mapping for smooth BSDF (mesh '%s')\n", mesh->getName().c_str());
+		}
+	}
+
 	Vector dndu, dndv;
-	(its.instance ? its.instance : its.shape)->getNormalDerivative(its, dndu, dndv, true);
+	sh->getNormalDerivative(its, dndu, dndv, true);
 	computeShadingFrameDerivative(its.shFrame.n, its.dpdu, dndu, dndv, du, dv);
 }
 

@@ -21,6 +21,7 @@
 #include <mitsuba/bidir/mut_caustic.h>
 #include <mitsuba/bidir/mut_mchain.h>
 #include <mitsuba/bidir/mut_manifold.h>
+#include <mitsuba/bidir/mut_halfvector.h>
 #include <mitsuba/bidir/pathsampler.h>
 #include <mitsuba/bidir/util.h>
 #include <mitsuba/core/sfcurve.h>
@@ -134,6 +135,9 @@ public:
 				m_config.probFactor, true, true,
 				m_config.avgAngleChangeSurface,
 				m_config.avgAngleChangeMedium));
+
+	if (m_config.halfvectorPerturbation)
+	  m_mutators.push_back(new HalfvectorPerturbation(m_scene, m_indepSampler, *m_pool, m_config.probFactor));
 
 		if (m_mutators.size() == 0)
 			Log(EError, "There must be at least one mutator!");

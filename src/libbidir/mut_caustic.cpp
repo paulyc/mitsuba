@@ -28,7 +28,7 @@ static StatsCounter statsGenerated("Caustic perturbation",
 
 CausticPerturbation::CausticPerturbation(const Scene *scene, Sampler *sampler,
 		MemoryPool &pool, Float minJump, Float coveredArea) :
-	m_scene(scene), m_sampler(sampler), m_pool(pool) {
+	MutatorBase(scene, sampler, pool) {
 
 	if (!scene->getSensor()->getClass()->derivesFrom(MTS_CLASS(PerspectiveCamera)))
 		Log(EError, "The caustic perturbation requires a perspective camera.");
@@ -142,18 +142,9 @@ bool CausticPerturbation::sampleMutation(
 
 	/* If necessary, propagate the perturbation through a sequence of
 	   ideally specular interactions */
-	for (int i=l+1; i<m-1; ++i) {
-		Float dist = source.edge(i)->length +
-			perturbMediumDistance(m_sampler, source.vertex(i+1));
-
-		if (!proposal.vertex(i)->propagatePerturbation(m_scene,
-				proposal.vertex(i-1), proposal.edge(i-1),
-				proposal.edge(i), proposal.vertex(i+1),
-				source.vertex(i)->getComponentType(), dist,
-				source.vertex(i+1)->getType(), EImportance)) {
-			proposal.release(l, m+1, m_pool);
-			return false;
-		}
+	if(!perturbSubpath(source, proposal, l, m-1, EPerturbAllDistances)) {
+		proposal.release(l, m+1, m_pool);
+		return false;
 	}
 
 	if (!PathVertex::connect(m_scene,
@@ -199,18 +190,7 @@ Float CausticPerturbation::Q(const Path &source, const Path &proposal,
 	Spectrum weight = muRec.weight * proposal.edge(m-1)->evalCached(
 		proposal.vertex(m-1), proposal.vertex(m), PathEdge::EEverything);
 
-	for (int i=l; i<m-1; ++i) {
-		const PathVertex *v0 = proposal.vertex(i),
-			  *v1 = proposal.vertex(i+1);
-		const PathEdge *edge = proposal.edge(i);
-
-		weight *= edge->evalCached(v0, v1,
-			PathEdge::ETransmittance | PathEdge::EValueCosineImp);
-
-		if (v1->isMediumInteraction())
-			weight /= pdfMediumPerturbation(source.vertex(i+1),
-					source.edge(i), edge);
-	}
+	weight *= subpathThroughput(source, proposal, l, m-1, EPerturbAllDistances);
 
 	const Float lumWeight = weight.getLuminance();
 	if(lumWeight <= RCPOVERFLOW)

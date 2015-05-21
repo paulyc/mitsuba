@@ -41,6 +41,7 @@ struct MLTConfiguration {
 	bool lensPerturbation;
 	bool multiChainPerturbation;
 	bool manifoldPerturbation;
+	bool halfvectorPerturbation;  
 	Float luminance;
 	Float probFactor;
 	int workUnits;
@@ -67,6 +68,8 @@ struct MLTConfiguration {
 			oss << "multiChain ";
 		if (manifoldPerturbation)
 			oss << "manifold ";
+	if (halfvectorPerturbation)
+	  oss << "halfVector ";    
 		SLog(EDebug, "Veach-MLT configuration:");
 		SLog(EDebug, "   Maximum path length         : %i", maxDepth);
 		SLog(EDebug, "   Active mutators             : %s", oss.str().c_str());
@@ -98,6 +101,7 @@ struct MLTConfiguration {
 		lensPerturbation = stream->readBool();
 		multiChainPerturbation = stream->readBool();
 		manifoldPerturbation = stream->readBool();
+		halfvectorPerturbation = stream->readBool();
 		luminance = stream->readFloat();
 		probFactor = stream->readFloat();
 		workUnits = stream->readInt();
@@ -124,6 +128,7 @@ struct MLTConfiguration {
 		stream->writeBool(lensPerturbation);
 		stream->writeBool(multiChainPerturbation);
 		stream->writeBool(manifoldPerturbation);
+		stream->writeBool(halfvectorPerturbation);
 		stream->writeFloat(luminance);
 		stream->writeFloat(probFactor);
 		stream->writeInt(workUnits);

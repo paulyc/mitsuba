@@ -27,8 +27,7 @@ static StatsCounter statsGenerated("Lens perturbation",
 		"Successful generation rate", EPercentage);
 
 LensPerturbation::LensPerturbation(const Scene *scene, Sampler *sampler,
-		MemoryPool &pool, Float minJump, Float coveredArea) :
-	m_scene(scene), m_sampler(sampler), m_pool(pool) {
+		MemoryPool &pool, Float minJump, Float coveredArea) : MutatorBase(scene, sampler, pool) {
 
 	if (!scene->getSensor()->getClass()->derivesFrom(MTS_CLASS(PerspectiveCamera)))
 		Log(EError, "The lens perturbation requires a perspective camera.");
@@ -139,18 +138,9 @@ bool LensPerturbation::sampleMutation(
 
 	/* If necessary, propagate the perturbation through a sequence of
 	   ideally specular interactions */
-	for (int i=m-1; i>l+1; --i) {
-		Float dist = source.edge(i-1)->length +
-			perturbMediumDistance(m_sampler, source.vertex(i-1));
-
-		if (!proposal.vertex(i)->propagatePerturbation(m_scene,
-				proposal.vertex(i+1), proposal.edge(i),
-				proposal.edge(i-1), proposal.vertex(i-1),
-				source.vertex(i)->getComponentType(), dist,
-				source.vertex(i-1)->getType(), ERadiance)) {
-			proposal.release(l, m+1, m_pool);
-			return false;
-		}
+	if(!perturbSubpath(source, proposal, m, l+1, EPerturbAllDistances)) {
+		proposal.release(l, m+1, m_pool);
+		return false;
 	}
 
 	if (!PathVertex::connect(m_scene,
@@ -182,19 +172,11 @@ Float LensPerturbation::Q(const Path &source, const Path &proposal,
 		proposal.edge(l)->evalCached(proposal.vertex(l), proposal.vertex(l+1),
 			PathEdge::EEverything);
 
-	for (int i=m; i>l+1; --i) {
-		const PathVertex *v0 = proposal.vertex(i-1),
-			  *v1 = proposal.vertex(i);
-		const PathEdge *edge = proposal.edge(i-1);
-
-		weight *= edge->evalCached(v0, v1,
-			PathEdge::ETransmittance |
-			(i != m ? PathEdge::EValueCosineRad : 0));
-
-		if (v0->isMediumInteraction())
-			weight /= pdfMediumPerturbation(source.vertex(i-1),
-					source.edge(i-1), edge);
-	}
+	weight *= subpathThroughput(source, proposal, m, l+1, EPerturbAllDistances);
+	
+	/* Sampling density of image plane */
+	weight /= proposal.edge(m-1)->evalCached(proposal.vertex(m-1), proposal.vertex(m),
+							   PathEdge::EValueCosineRad);
 
 	const Float lumWeight = weight.getLuminance();
 	if(lumWeight <= RCPOVERFLOW)

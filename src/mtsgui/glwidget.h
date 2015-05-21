@@ -78,7 +78,7 @@ public:
 #else
 		return false;
 #endif
-    }
+	}
 
 	void startCrop(ECropType type);
 
@@ -124,6 +124,7 @@ protected:
 	void dragEnterEvent(QDragEnterEvent *event);
 	void dropEvent(QDropEvent *event);
 	void oglRenderKDTree(const KDTreeBase<AABB> *kdtree);
+	void oglRenderDebugVisualization(const void* visData);
 	Point2i upperLeft(bool flipY = false) const;
 	void reveal(const AABB &aabb);
 	Float autoFocus() const;

@@ -566,6 +566,8 @@ void GLWidget::keyPressEvent(QKeyEvent *event) {
 				return;
 			}
 			break;
+	case Qt::Key_P: 
+	  m_context->showDebugVis = !m_context->showDebugVis; break;
 		case Qt::Key_M: startCrop(ECropAndMagnify); break;
 		case Qt::Key_C: startCrop(ECrop); break;
 		case Qt::Key_A: {
@@ -1315,6 +1317,17 @@ void GLWidget::paintGL() {
 			m_renderer->setBlendMode(Renderer::EBlendNone);
 			glPopAttrib();
 		}
+
+	// visualize debug data
+	if(m_context->showDebugVis && m_context->scene && m_context->scene->getDebugVisData() && camera)
+	{
+	  glPushAttrib(GL_VIEWPORT_BIT);
+			upperLeft = this->upperLeft(true);
+			glViewport(upperLeft.x, upperLeft.y, size.x, size.y);
+			m_renderer->setCamera(camera);
+			oglRenderDebugVisualization(m_context->scene->getDebugVisData());
+			glPopAttrib();
+	}
 	}
 	swapBuffers();
 }
@@ -1355,6 +1368,112 @@ void GLWidget::oglRenderKDTree(const KDTreeBase<AABB> *kdtree) {
 			}
 		}
 	}
+	glDisable(GL_LINE_SMOOTH);
+}
+
+namespace
+{
+	struct DebugVertex {
+		Point p;
+		Spectrum c;
+	};
+  struct DebugVis
+  {
+	enum { bufferSize = 500 };
+	std::vector<DebugVertex> paths[bufferSize];
+	int num_paths;
+	int current_head;
+	bool capture;
+  };
+}
+
+static Spectrum hue_colormap(const Float v, const Float range_min = (Float)0, const Float range_max = (Float)1)
+{
+	const Float t = math::clamp((range_max - v)/(range_max - range_min), (Float)0, (Float)1);
+	const Float H1 = math::clamp(t, (Float)0, (Float)1) * 4;
+	const Float X = math::clamp(1.f-std::abs(std::fmod(H1, (Float)2) - (Float)1), (Float)0, (Float)1);
+
+  Spectrum color;
+	if(H1<1)
+	color.fromLinearRGB(1, X, 0);
+	else if(H1<2)
+	color.fromLinearRGB(X, 1, 0);
+	else if(H1<3)
+	color.fromLinearRGB(0, 1, X);
+  else
+	color.fromLinearRGB(0, X, 1);
+
+  return color;
+}
+
+void GLWidget::oglRenderDebugVisualization(const void* visData)
+{
+  const DebugVis* data = (const DebugVis*)(visData);
+  if(!data || data->num_paths < 1)
+	return;
+
+  if(m_context->mode == EPreview)
+	m_renderer->setDepthTest(true);
+  else
+  m_renderer->setDepthTest(false);
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+  m_renderer->setDepthMask(false);
+  m_renderer->setBlendMode(Renderer::EBlendAlpha);
+
+  glEnable(GL_LINE_SMOOTH);
+	glLineWidth(1.0f);
+  glBegin(GL_LINES);
+  for(int k=data->current_head;k<data->num_paths+data->current_head;++k)
+  {
+	// set a color
+	const Float t = Float(k-(data->current_head))/(data->num_paths-1);
+	const Spectrum color = hue_colormap(t);
+
+	const std::vector<DebugVertex>& path = data->paths[k%data->num_paths];
+	if(path.size() < 2)
+	  continue;
+
+	for(int i=0;i<(int)path.size()-1;++i)
+	{
+	  const DebugVertex& v0 = path[i];
+	  const DebugVertex& v1 = path[i+1];
+
+	  m_renderer->setColor(v0.c);
+	  glVertex3f((float)v0.p.x, (float)v0.p.y, (float)v0.p.z);
+	  m_renderer->setColor(v1.c);
+	  glVertex3f((float)v1.p.x, (float)v1.p.y, (float)v1.p.z);
+	}
+  }
+	glEnd();
+
+  // draw hidden lines
+  if(m_context->mode == EPreview)
+  {
+	  glLineWidth(0.6f);
+	glDepthFunc(GL_GREATER);
+	glBegin(GL_LINES);
+	const float weight = 10.f / sqrtf(data->num_paths+1);
+	const float weight_hi = math::clamp(weight * 4.f, 0.f, 1.f);
+	for(int k=data->current_head;k<data->num_paths+data->current_head;++k)
+	{
+	  const std::vector<DebugVertex>& path = data->paths[k%data->num_paths];
+	  if(path.size() < 2)
+		continue;
+
+	  for(int i=0;i<(int)path.size()-1;++i)
+	  {
+		const DebugVertex& v0 = path[i];
+		const DebugVertex& v1 = path[i+1];
+				m_renderer->setColor(v0.c, weight);
+				glVertex3f((float)v0.p.x, (float)v0.p.y, (float)v0.p.z);
+				m_renderer->setColor(v1.c, weight_hi);
+				glVertex3f((float)v1.p.x, (float)v1.p.y, (float)v1.p.z);
+			}
+	}
+		glEnd();
+	glDepthFunc(GL_LEQUAL);
+  }
+	m_renderer->setBlendMode(Renderer::EBlendNone);
 	glDisable(GL_LINE_SMOOTH);
 }
 

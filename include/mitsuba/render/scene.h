@@ -849,7 +849,7 @@ public:
 		return emitter->getSamplingWeight() * m_emitterPDF.getNormalization();
 	}
 
- 	/**
+	/**
 	 * \brief Importance sample a ray according to the emission profile
 	 * defined by the sensors in the scene
 	 *
@@ -1130,6 +1130,10 @@ public:
 
 	/// Return a string representation
 	std::string toString() const;
+
+  /* Debug visualization */
+  void setDebugVisData(void* vd) const { if(!(!m_kdtree)) m_kdtree->m_visData = vd; }
+  void*getDebugVisData() const { return (!m_kdtree)?NULL:m_kdtree->m_visData; }
 
 	//! @}
 	// =============================================================

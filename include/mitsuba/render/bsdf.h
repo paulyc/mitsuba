@@ -465,7 +465,7 @@ public:
 	 *
 	 * By default, it returns <tt>its.shFrame</tt>
 	 */
-	virtual Frame getFrame(const Intersection &its) const;
+	virtual void getFrame(const Intersection &its, Frame &frame) const;
 
 	/**
 	 * \brief Sometimes, BSDF models make use of a perturbed frame for

@@ -24,19 +24,24 @@
 #include <Eigen/LU>
 #include <Eigen/Geometry>
 
+#define MTS_MANIFOLD_EPSILON        Epsilon
+#define MTS_MANIFOLD_HV_EPSILON     Epsilon
+
 MTS_NAMESPACE_BEGIN
 
 /* Some statistics counters */
 static StatsCounter statsStepFailed(
-		"Specular manifold", "Retries (step failed)");
+		"Specular manifold", "Retries (step failed)", EPercentage);
 static StatsCounter statsStepTooFar(
-		"Specular manifold", "Retries (step increased distance)");
+		"Specular manifold", "Retries (step increased distance)", EPercentage);
 static StatsCounter statsStepSuccess(
-		"Specular manifold", "Successful steps");
+		"Specular manifold", "Successful steps", EPercentage);
 static StatsCounter statsAvgIterations(
-		"Specular manifold", "Avg. iterations per walk", EAverage);
+		"Specular manifold", "Iterations: Avg. per walk", EAverage);
 static StatsCounter statsAvgIterationsSuccess(
-		"Specular manifold", "Avg. iterations per successful walk", EAverage);
+		"Specular manifold", "Iterations: Avg. per successful walk", EAverage);
+static StatsCounter statsMaxIterationsSuccess(
+		"Specular manifold", "Iterations: Max per successful walk", EMaximumValue);
 static StatsCounter statsAvgManifoldSize(
 		"Specular manifold", "Avg. manifold size", EAverage);
 static StatsCounter statsSuccessfulWalks(
@@ -46,17 +51,19 @@ static StatsCounter statsMediumSuccess(
 static StatsCounter statsNonManifold(
 		"Specular manifold", "Non-manifold", EPercentage);
 static StatsCounter statsUpdateFailed(
-		"Specular manifold", "Update failed");
+		"Specular manifold", "Update failed", EPercentage);
 static StatsCounter statsMaxManifold(
 		"Specular manifold", "Max. manifold size", EMaximumValue);
+static StatsCounter statsFullMxInversion(
+		"Specular manifold", "Full matrix inversion", EPercentage);
 
-SpecularManifold::SpecularManifold(const Scene *scene, int maxIterations)
-  : m_scene(scene) {
+PathManifold::PathManifold(const Scene *scene, int maxIterations)
+  : m_scene(scene), m_det(1.f) {
 	m_maxIterations = maxIterations > 0 ? maxIterations :
 		MTS_MANIFOLD_MAX_ITERATIONS;
 }
 
-bool SpecularManifold::init(const Path &path, int start, int end) {
+bool PathManifold::init(const Path &path, int start, int end) {
 	int step = start < end ? 1 : -1;
 	if (path.vertex(start)->isSupernode())
 		start += step;
@@ -67,62 +74,36 @@ bool SpecularManifold::init(const Path &path, int start, int end) {
 		*vs = path.vertex(start),
 		*ve = path.vertex(end);
 
-	/* Create the initial vertex that is pinned in position by default */
-	SimpleVertex v(EPinnedPosition, vs->getPosition());
-
-	/* When the endpoint is on an orthographic camera or directional light
-	   source, switch to a directionally pinned vertex instead */
-	if (vs->getType() & (PathVertex::ESensorSample | PathVertex::EEmitterSample)) {
-		const PositionSamplingRecord &pRec
-			= vs->getPositionSamplingRecord();
-		uint32_t type = static_cast<const AbstractEmitter *>(pRec.object)->getType()
-			& (AbstractEmitter::EDeltaDirection | AbstractEmitter::EDeltaPosition);
-		if (type == AbstractEmitter::EDeltaDirection) {
-			v.type = EPinnedDirection;
-			v.gn = v.n = pRec.n;
-			coordinateSystem(pRec.n, v.dpdu, v.dpdv);
-		}
-	}
-
 	m_time = vs->getTime();
-	m_vertices.clear();
-	m_vertices.push_back(v);
+	m_vertices.resize(std::abs(end-start)+1);
 
-	for (int i=start + step; i != end; i += step) {
+	initEndpoints(vs, path.vertex(start+step), path.vertex(end-step), ve);
+
+	for (int i=start + step, iv=1; i != end; i += step, ++iv) {
 		const PathVertex
 			*pred = path.vertex(i-step),
 			*vertex = path.vertex(i),
 			*succ = path.vertex(i+step);
+		SimpleVertex& v = m_vertices[iv];
 
 		if (vertex->isSurfaceInteraction()) {
 			const Intersection &its = vertex->getIntersection();
 			const BSDF *bsdf = its.getBSDF();
 
 			v.p = its.p;
-			v.gn = its.geoFrame.n;
-			v.n = its.shFrame.n;
 			v.dpdu = its.dpdu;
 			v.dpdv = its.dpdv;
 			v.object = bsdf;
 			v.degenerate = !vertex->isConnectable();
-			const Shape *shape = its.instance != NULL ? its.instance : its.shape;
-			shape->getNormalDerivative(its, v.dndu, v.dndv);
+			bsdf->getFrame(its, v.shFrame);
+			bsdf->getFrameDerivative(its, v.shFrameDu, v.shFrameDv);
 
-			/* Turn into an orthonormal parameterization at 'p' */
-			Float invLen = 1 / v.dpdu.length();
-			v.dpdu *= invLen;
-			v.dndu *= invLen;
-			Float dp = dot(v.dpdu, v.dpdv);
-			Vector dpdv = v.dpdv - dp * v.dpdu;
-			Vector dndv = v.dndv - dp * v.dndu;
-			invLen = 1 / dpdv.length();
-			v.dpdv = dpdv * invLen;
-			v.dndv = dndv * invLen;
+			v.roughness = getEffectiveRoughness(vertex);
 
 			Vector wPred = pred->getPosition() - v.p;
 			Vector wSucc = succ->getPosition() - v.p;
 
-			if (dot(v.gn, wPred) * dot(v.gn, wSucc) < 0) {
+			if (dot(v.shFrame.n, wPred) * dot(v.shFrame.n, wSucc) < 0) {
 				v.type = ERefraction;
 				v.eta = bsdf->getEta();
 			} else {
@@ -136,16 +117,18 @@ bool SpecularManifold::init(const Path &path, int start, int end) {
 			Float invLength = 1.0f / wi.length();
 			wi *= invLength;
 
+			/* For medium, take a mean cosine of the phase function as a mean "roughness" */
+			v.roughness = 1 - std::abs(mRec.getPhaseFunction()->getMeanCosine());
+
 			v.p = mRec.p;
-			v.gn = v.n = Normal(0.0f);
+			v.shFrame.n = Normal(wi);
 
-			Vector s, t;
-			coordinateSystem(wi, s, t);
+			coordinateSystem(wi, v.shFrame.s, v.shFrame.t);
 
-		 	v.dpdu = s;
-			v.dpdv = t;
-		 	v.dndu = s * invLength;
-			v.dndv = t * invLength;
+			v.dpdu = v.shFrame.s;
+			v.dpdv = v.shFrame.t;
+			v.shFrameDu.n = v.shFrame.s * invLength;
+			v.shFrameDv.n = v.shFrame.t * invLength;
 
 			v.object = mRec.getPhaseFunction();
 			v.eta = 1.0f;
@@ -154,28 +137,78 @@ bool SpecularManifold::init(const Path &path, int start, int end) {
 		} else {
 			Log(EError, "Unknown vertex type! : %s", vertex->toString().c_str());
 		}
-
-		m_vertices.push_back(v);
 	}
-
-	v = SimpleVertex(EMovable, ve->getPosition());
-	m_vertices.push_back(v);
 
 	#if MTS_MANIFOLD_DEBUG == 1
 		cout << "==========================================" << endl;
-		cout << "Initialized specular manifold: " << toString() << endl;
+		cout << "Initialized path manifold: " << toString() << endl;
 	#endif
 
 	return true;
 }
 
-bool SpecularManifold::computeTangents() {
-	const int n = static_cast<int>(m_vertices.size() - 1);
+void PathManifold::initEndpoints(const PathVertex* vs, const PathVertex* vpred_s, const PathVertex* vpred_e, const PathVertex* ve) {
+	/* Create the initial vertex that is pinned in position by default */
+	{
+		SimpleVertex& v = m_vertices[0];
+		v.type = EPinnedPosition;
+		v.p = vs->getPosition();
+		v.degenerate = false;
+
+		/* When the endpoint is on an orthographic camera or directional light
+		   source, switch to a directionally pinned vertex instead */
+		if (vs->getType() & (PathVertex::ESensorSample | PathVertex::EEmitterSample)) {
+			const PositionSamplingRecord &pRec = vs->getPositionSamplingRecord();
+			uint32_t type = static_cast<const AbstractEmitter *>(pRec.object)->getType();
+			if (type & AbstractEmitter::EDeltaDirection)
+				v.type = EPinnedDirection;
+
+			v.shFrame = Frame(!pRec.n.isZero() ?
+					pRec.n : Normal(normalize(vpred_s->getPosition() - vs->getPosition())));
+		} else {
+			BDAssert(vs->isSurfaceInteraction() || vs->isMediumInteraction());
+			if (!vs->isMediumInteraction())
+				vs->getIntersection().getBSDF()->getFrame(vs->getIntersection(), v.shFrame);
+			else
+				v.shFrame = Frame(normalize(vpred_s->getPosition() - vs->getPosition()));
+		}
+		v.dpdu = v.shFrame.s;
+		v.dpdv = v.shFrame.t;
+	}
+
+	/* Last vertex */
+	{
+		SimpleVertex& v = m_vertices.back();
+		v.type = EMovable;
+		v.p = ve->getPosition();
+		v.degenerate = false;
+
+		if (ve->getType() & (PathVertex::ESensorSample | PathVertex::EEmitterSample)) {
+			const PositionSamplingRecord &pRec = ve->getPositionSamplingRecord();
+			uint32_t type = static_cast<const AbstractEmitter *>(pRec.object)->getType();
+			if (type & AbstractEmitter::EDeltaDirection)
+				v.type = EPinnedDirection;
+			v.shFrame = Frame(!pRec.n.isZero() ?
+					pRec.n : Normal(normalize(vpred_e->getPosition() - ve->getPosition())));
+		} else {
+			BDAssert(ve->isSurfaceInteraction() || ve->isMediumInteraction());
+			if (!ve->isMediumInteraction())
+				ve->getIntersection().getBSDF()->getFrame(ve->getIntersection(), v.shFrame);
+			else
+				v.shFrame = Frame(normalize(vpred_e->getPosition() - ve->getPosition()));
+		}
+		v.dpdu = v.shFrame.s;
+		v.dpdv = v.shFrame.t;
+	}
+}
+
+bool PathManifold::computeDerivatives() {
+	const int n = static_cast<int>(m_vertices.size()) - 1;
 
 	m_vertices[0].Tp.setZero();
-	m_vertices[m_vertices.size()-1].Tp.setIdentity();
+	m_vertices[n].Tp.setIdentity();
 
-	if (m_vertices.size() == 2) /* Nothing to do */
+	if (n == 1) /* Nothing to do */
 		return true;
 
 	/* Matrix assembly stage */
@@ -195,7 +228,6 @@ bool SpecularManifold::computeTangents() {
 			v[0].c.setZero();
 			continue;
 		} else if (v[0].type == EPinnedDirection) {
-
 			Vector dC_dnext_u = (v[1].dpdu - wo * dot(wo, v[1].dpdu)) * ilo;
 			Vector dC_dnext_v = (v[1].dpdv - wo * dot(wo, v[1].dpdv)) * ilo;
 			Vector dC_dcur_u = (wo * dot(wo, v[0].dpdu) - v[0].dpdu) * ilo;
@@ -223,56 +255,46 @@ bool SpecularManifold::computeTangents() {
 
 		if (v[0].type == EReflection || v[0].type == ERefraction) {
 			Float eta = v[0].eta;
-			bool normalizeH = !(v[0].type == ERefraction && eta == 1);
+			if (dot(wi, v[0].shFrame.n) < 0)
+				eta = 1 / eta;
 
 			/* Compute the half vector and a few useful projections */
-			Vector H;
-			Float ilh;
-			if (normalizeH) {
+			Vector H = wi + eta * wo;
+			const bool indexMatched = v[0].type == ERefraction && eta == 1.0f;
+			if (!indexMatched) {
 				/* Generally compute derivatives with respect to the normalized
 				   half-vector. When given an index-matched refraction event,
 				   don't perform this normalization, since the desired vertex
-				   configuration is actually where H = 0. */
-
-				if (dot(wi, v[0].gn) < 0)
-					eta = 1 / eta;
-
-				H = wi + eta * wo;
-				ilh = 1 / H.length();
+				   configuration is actually where H = 0.
+				   Otherwise compute derivatives for unnormalized half vector.
+				   For normalized one they are infinite in this case. */
+				Float ilh = dot(v[0].shFrame.n, H);
+				if (ilh == 0) {
+					Log(EWarn, "On-surface vertex has wrong configuration:\n%s\n", v[0].toString().c_str());
+					return false;	/* Report as a non-manifold in this case. Usually wrong path. */
+				}
+				ilh = 1 / ilh;
 				H *= ilh;
-			} else {
-				H = wi + wo;
-				ilh = 1.0f;
+				ilo *= eta * ilh; ili *= ilh;
 			}
 
-			/* Orient the half-vector so that it points in the same
-			   hemisphere as the geometric surface normal */
-
-			Float dot_H_n    = dot(v[0].n, H),
-			      dot_H_dndu = dot(v[0].dndu, H),
-			      dot_H_dndv = dot(v[0].dndv, H),
-			      dot_u_n    = dot(v[0].dpdu, v[0].n),
-			      dot_v_n    = dot(v[0].dpdv, v[0].n);
-
 			/* Local shading tangent frame */
-			Vector s = v[0].dpdu - dot_u_n * v[0].n;
-			Vector t = v[0].dpdv - dot_v_n * v[0].n;
-
-			ilo *= eta * ilh; ili *= ilh;
+			const Normal n = v[0].shFrame.n;
+			const Vector s = v[0].shFrame.s;
+			const Vector t = v[0].shFrame.t;
 
 			/* Derivatives of C with respect to x_{i-1} */
-			Vector
-			    dH_du = (v[-1].dpdu - wi * dot(wi, v[-1].dpdu)) * ili,
-			    dH_dv = (v[-1].dpdv - wi * dot(wi, v[-1].dpdv)) * ili;
+			Vector dH_du = (v[-1].dpdu - wi * dot(wi, v[-1].dpdu)) * ili,
+			       dH_dv = (v[-1].dpdv - wi * dot(wi, v[-1].dpdv)) * ili;
 
-			if (normalizeH) {
-				dH_du -= H * dot(dH_du, H);
-				dH_dv -= H * dot(dH_dv, H);
+			if (!indexMatched) {
+				dH_du -= H * dot(dH_du, n);
+				dH_dv -= H * dot(dH_dv, n);
 			}
 
 			v[0].a = Matrix2x2(
-			    dot(dH_du, s), dot(dH_dv, s),
-			    dot(dH_du, t), dot(dH_dv, t));
+				dot(dH_du, s), dot(dH_dv, s),
+				dot(dH_du, t), dot(dH_dv, t));
 
 			/* Derivatives of C with respect to x_i */
 			dH_du = -v[0].dpdu * (ili + ilo) + wi * (dot(wi, v[0].dpdu) * ili)
@@ -280,36 +302,34 @@ bool SpecularManifold::computeTangents() {
 			dH_dv = -v[0].dpdv * (ili + ilo) + wi * (dot(wi, v[0].dpdv) * ili)
 			                                 + wo * (dot(wo, v[0].dpdv) * ilo);
 
-			if (normalizeH) {
-				dH_du -= H * dot(dH_du, H);
-				dH_dv -= H * dot(dH_dv, H);
+			if (!indexMatched) {
+				dH_du -= H * (dot(H, v[0].shFrameDu.n) + dot(dH_du, n));
+				dH_dv -= H * (dot(H, v[0].shFrameDv.n) + dot(dH_dv, n));
 			}
 
+			/* (h * T)' = h' * T + h * T' */
 			v[0].b = Matrix2x2(
-			    dot(dH_du, s) - dot(v[0].dpdu, v[0].dndu) * dot_H_n - dot_u_n * dot_H_dndu,
-			    dot(dH_dv, s) - dot(v[0].dpdu, v[0].dndv) * dot_H_n - dot_u_n * dot_H_dndv,
-			    dot(dH_du, t) - dot(v[0].dpdv, v[0].dndu) * dot_H_n - dot_v_n * dot_H_dndu,
-			    dot(dH_dv, t) - dot(v[0].dpdv, v[0].dndv) * dot_H_n - dot_v_n * dot_H_dndv);
+				dot(dH_du, s) + dot(H, v[0].shFrameDu.s),   // ds/du
+				dot(dH_dv, s) + dot(H, v[0].shFrameDv.s),   // ds/dv
+				dot(dH_du, t) + dot(H, v[0].shFrameDu.t),   // dt/du
+				dot(dH_dv, t) + dot(H, v[0].shFrameDv.t));  // dt/dv
 
 			/* Derivatives of C with respect to x_{i+1} */
 			dH_du = (v[1].dpdu - wo * dot(wo, v[1].dpdu)) * ilo;
 			dH_dv = (v[1].dpdv - wo * dot(wo, v[1].dpdv)) * ilo;
 
-			if (normalizeH) {
-				dH_du -= H * dot(dH_du, H);
-				dH_dv -= H * dot(dH_dv, H);
+			if (!indexMatched) {
+				dH_du -= H * dot(dH_du, n);
+				dH_dv -= H * dot(dH_dv, n);
 			}
 
 			v[0].c = Matrix2x2(
-			    dot(dH_du, s), dot(dH_dv, s),
-			    dot(dH_du, t), dot(dH_dv, t));
+				dot(dH_du, s), dot(dH_dv, s),
+				dot(dH_du, t), dot(dH_dv, t));
 
 			/* Store the microfacet normal wrt. the local (orthonormal) shading frame */
-			s = normalize(s);
-			t = cross(v[0].n, s);
-			v[0].m = Vector(dot(s, H), dot(t, H), dot(v[0].n, H));
-			if (dot(H, v[0].gn) < 0)
-				v[0].m = -v[0].m;
+			Vector m = v[0].shFrame.toLocal(indexMatched ? H : normalize(H));
+			v[0].m = m * math::signum(Frame::cosTheta(m));
 		} else if (v[0].type == EMedium) {
 			Vector dwi_dpred_u = (v[-1].dpdu - wi * dot(wi, v[-1].dpdu)) * ili;
 			Vector dwi_dpred_v = (v[-1].dpdv - wi * dot(wi, v[-1].dpdv)) * ili;
@@ -371,37 +391,50 @@ bool SpecularManifold::computeTangents() {
 				(t_next_dpdu - t_wo * dot(wo, v[1].dpdu)) * ilo,
 				(t_next_dpdv - t_wo * dot(wo, v[1].dpdv)) * ilo);
 
-			v[0].m = Vector(dot(s, wo), dot(t, wo), dot(wi, wo));
+			v[0].m = v[0].shFrame.toLocal(wo);
 		} else {
 			Log(EError, "Unknown vertex type!");
 		}
 	}
 
+	return true;
+}
+
+bool PathManifold::computeTransferMatrices() {
+	const int n = static_cast<int>(m_vertices.size() - 1);
+	m_det = 1.f;
+	if (n < 2)
+		return true;
+	
 	/* Find the tangent space with respect to translation of the last
 	   vertex. For this, we must solve a tridiagonal system. The following is
 	   simplified version of the block tridiagonal LU factorization algorithm
 	   for this specific problem */
+	Float det;
 	Matrix2x2 Li;
-	if (!m_vertices[0].b.invert(Li))
+	if (!m_vertices[0].b.invert2x2(Li, det))
 		return false;
+	m_det *= det;
 
+	Matrix2x2* u = (Matrix2x2*)alloca(sizeof(Matrix2x2)*(n-1));
 	for (int i=0; i < n - 1; ++i) {
-		m_vertices[i].u = Li * m_vertices[i].c;
-		Matrix2x2 temp = m_vertices[i+1].b - m_vertices[i+1].a * m_vertices[i].u;
-		if (!temp.invert(Li))
+		u[i] = Li * m_vertices[i].c;
+		const Matrix2x2 t = m_vertices[i+1].b - m_vertices[i+1].a * u[i];
+		if (!t.invert2x2(Li, det))
 			return false;
+		m_det *= det;
 	}
 
 	m_vertices[n-1].Tp = -Li * m_vertices[n-1].c;
 
 	for (int i=n-2; i>=0; --i)
-		m_vertices[i].Tp = -m_vertices[i].u * m_vertices[i+1].Tp;
+		m_vertices[i].Tp = -u[i] * m_vertices[i+1].Tp;
 	return true;
 }
 
-bool SpecularManifold::project(const Vector &d) {
+bool PathManifold::project(const Vector &d) {
 	const SimpleVertex &last = m_vertices[m_vertices.size()-1];
-	Float du = dot(d, last.dpdu), dv = dot(d, last.dpdv);
+	const Float du = dot(d, last.dpdu), dv = dot(d, last.dpdv);
 
 	Ray ray(Point(0.0f), Vector(1.0f), 0); // make gcc happy
 	Intersection its;
@@ -412,50 +445,43 @@ bool SpecularManifold::project(const Vector &d) {
 		SimpleVertex &vertex = m_proposal[i];
 
 		if (i == 0) {
-			Point p0 = m_vertices[0].p + m_vertices[0].map(du, dv);
-			Point p1 = m_vertices[1].p + m_vertices[1].map(du, dv);
+			const Point p0 = m_vertices[0].p + m_vertices[0].map(du, dv);
+			const Point p1 = m_vertices[1].p + m_vertices[1].map(du, dv);
 
 			ray = Ray(p0, normalize(p1 - p0), m_time);
 			vertex.p = ray.o;
 			continue;
 		} else if (vertex.type == EMovable) {
-			Float dp = dot(ray.d, vertex.n);
+			const Float dp = dot(ray.d, vertex.shFrame.n);
 			if (std::abs(dp) < Epsilon)
 				return false;
 
-			Float t = dot(vertex.p - ray.o, vertex.n) / dp;
+			const Float t = dot(vertex.p - ray.o, vertex.shFrame.n) / dp;
 			vertex.p = ray(t);
 			break;
-		} else if (vertex.type == EReflection) {
+		} else if (vertex.type == EReflection || vertex.type == ERefraction) {
 			if (!m_scene->rayIntersect(ray, its))
 				return false;
-
-			Vector n = its.shFrame.n,
-				   s = its.dpdu, t;
-			s = normalize(s - n * dot(n, s));
-			t = cross(n, s);
-
-			Vector m = s * vertex.m[0] + t * vertex.m[1] + n * vertex.m[2];
-
-			ray.setOrigin(its.p);
-			ray.setDirection(reflect(-ray.d, m));
-		} else if (vertex.type == ERefraction) {
-			if (!m_scene->rayIntersect(ray, its))
+			const BSDF *bsdf = its.shape->getBSDF();
+			if (vertex.object != bsdf)
 				return false;
 
-			Vector n = its.shFrame.n,
-				   s = its.dpdu, t;
-			s = normalize(s - n * dot(n, s));
-			t = cross(n, s);
+			bsdf->getFrame(its, vertex.shFrame);
+			Vector m = vertex.shFrame.toWorld(vertex.m);
 
-			Vector m = s * vertex.m[0] + t * vertex.m[1] + n * vertex.m[2];
-			Vector refracted = refract(-ray.d, m, its.shape->getBSDF()->getEta());
+			const Vector scattered = (vertex.type == EReflection) ?
+				reflect(-ray.d, m) :
+				refract(-ray.d, m, bsdf->getEta());
 
-			if (refracted.isZero())
+			if (scattered.isZero())
 				return false;
 
+			vertex.p = its.p;
+			vertex.dpdu = its.dpdu;
+			vertex.dpdv = its.dpdv;
+			bsdf->getFrameDerivative(its, vertex.shFrameDu, vertex.shFrameDv);
 			ray.setOrigin(its.p);
-			ray.setDirection(refracted);
+			ray.setDirection(scattered);
 		} else if (vertex.type == EMedium) {
 			Float length = (m_vertices[i].p - m_vertices[i-1].p).length(),
 				  invLength = 1.0f / length;
@@ -464,52 +490,28 @@ bool SpecularManifold::project(const Vector &d) {
 			if (m_scene->rayIntersect(Ray(ray, Epsilon, length)))
 				return false;
 
+			Vector wi = -ray.d;
 			vertex.p = ray(length);
-			vertex.n = Vector(0.0f);
+			vertex.shFrame.n = wi;
 
-			Vector wi = -ray.d, s, t;
-			coordinateSystem(wi, s, t);
+			coordinateSystem(wi, vertex.dpdu, vertex.dpdv);
 
-		 	vertex.dpdu = s;
-			vertex.dpdv = t;
-		 	vertex.dndu = s * invLength;
-			vertex.dndv = t * invLength;
+			vertex.shFrame.s = vertex.dpdu;
+			vertex.shFrame.t = vertex.dpdv;
+			vertex.shFrameDu.n = vertex.dpdu * invLength;
+			vertex.shFrameDv.n = vertex.dpdv * invLength;
 
 			ray.setOrigin(vertex.p);
-			ray.setDirection(s * vertex.m[0] + t * vertex.m[1] + wi * vertex.m[2]);
+			const Vector m = vertex.shFrame.toWorld(vertex.m);
+			ray.setDirection(m);
 		} else {
 			Log(EError, "Unsupported vertex type!");
-		}
-
-		if (vertex.type != EMedium) {
-			if (vertex.object != its.shape->getBSDF())
-				return false;
-
-			vertex.p = its.p;
-			vertex.n = its.shFrame.n;
-			vertex.gn = its.geoFrame.n;
-			vertex.dpdu = its.dpdu;
-			vertex.dpdv = its.dpdv;
-
-			const Shape *shape = its.instance != NULL ? its.instance : its.shape;
-			shape->getNormalDerivative(its,
-				vertex.dndu, vertex.dndv);
-
-			/* Turn into an orthonormal parameterization at 'p' */
-			Float invLen = 1 / vertex.dpdu.length();
-			vertex.dpdu *= invLen; vertex.dndu *= invLen;
-			Float dp = dot(vertex.dpdu, vertex.dpdv);
-			Vector dpdv = vertex.dpdv - dp * vertex.dpdu;
-			Vector dndv = vertex.dndv - dp * vertex.dndu;
-			invLen = 1 / dpdv.length();
-			vertex.dpdv = dpdv * invLen;
-			vertex.dndv = dndv * invLen;
 		}
 	}
 	return true;
 }
 
-bool SpecularManifold::move(const Point &target, const Normal &n) {
+bool PathManifold::move(const Point &target, const Normal &n) {
 	SimpleVertex &last = m_vertices[m_vertices.size()-1];
 
 	#if MTS_MANIFOLD_DEBUG == 1
@@ -540,9 +542,11 @@ bool SpecularManifold::move(const Point &target, const Normal &n) {
 			std::abs(target.y)), std::abs(target.z));
 	Float stepSize = 1;
 
+	/* Replace the derivative at the last vertex with the virtual plane connecting source and target */
 	BDAssert(last.type == EMovable);
-	coordinateSystem(n, last.dpdu, last.dpdv);
-	last.n = n;
+	last.shFrame = Frame(n);
+	last.dpdu = last.shFrame.s;
+	last.dpdv = last.shFrame.t;
 
 	m_proposal.reserve(m_vertices.size());
 	m_iterations = 0;
@@ -555,7 +559,7 @@ bool SpecularManifold::move(const Point &target, const Normal &n) {
 			   two vertices converge to the same point (this can
 			   happen e.g. on rough planar reflectors) */
 			dist = (m_vertices[m_vertices.size()-1].p
-			      - m_vertices[m_vertices.size()-2].p).length();
+				  - m_vertices[m_vertices.size()-2].p).length();
 			if (dist * invScale < Epsilon) {
 				return false;
 			}
@@ -564,6 +568,7 @@ bool SpecularManifold::move(const Point &target, const Normal &n) {
 			++statsSuccessfulWalks;
 			statsAvgIterationsSuccess.incrementBase();
 			statsAvgIterationsSuccess += m_iterations;
+			statsMaxIterationsSuccess.recordMaximum(m_iterations);
 			if (medium)
 				++statsMediumSuccess;
 			#if MTS_MANIFOLD_DEBUG == 1
@@ -576,8 +581,11 @@ bool SpecularManifold::move(const Point &target, const Normal &n) {
 		++statsAvgIterations;
 
 		/* Compute the tangent vectors for the current path */
+		statsStepTooFar.incrementBase();
+		statsStepFailed.incrementBase();
 		statsNonManifold.incrementBase();
-		if (!computeTangents()) {
+		statsStepSuccess.incrementBase();
+		if (!computeDerivatives() || !computeTransferMatrices()) {
 			++statsNonManifold;
 			#if MTS_MANIFOLD_DEBUG == 1
 				cout << "move(): unable to compute tangents!" << endl;
@@ -634,7 +642,197 @@ bool SpecularManifold::move(const Point &target, const Normal &n) {
 	return false;
 }
 
-bool SpecularManifold::update(Path &path, int start, int end) {
+bool PathManifold::halfvectorsToPositions(const vector_hv& h_tg, const Float stepSize) {
+	// custom LU decomposition based matrix solve
+	const int n = (int) m_vertices.size()-1;
+
+	// solve for delta x
+	Matrix2x2* Li = (Matrix2x2*)alloca((n+1)*sizeof(Matrix2x2));
+	Matrix2x2* A = (Matrix2x2*)alloca((n+1)*sizeof(Matrix2x2));
+	if (!m_vertices[0].b.invert2x2(Li[0]))
+		return false;
+	// invert only up to vertex n-1, the last one is fixed and doesn't have a half vector constraint.
+	for (int k=1; k<n; k++) {
+		A[k] = m_vertices[k].a * Li[k-1];
+		// L = b - au
+		const Matrix2x2 t = m_vertices[k].b - A[k]*m_vertices[k-1].c;
+		if (!t.invert2x2(Li[k]))
+			return false;
+	}
+
+	Vector2* H = (Vector2*)alloca((n+1)*sizeof(Vector2));
+	H[0] = Vector2(0.0f, 0.0f);
+	for (int k = 1; k<n; k++) {
+		// create tangent space half vector delta
+		const SimpleVertex& v = m_vertices[k];
+		const Vector2 dh = h_tg[k-1] - Vector2(v.m.x, v.m.y) / v.m.z;
+		// Involve it into LU
+		H[k] = dh - A[k] * H[k-1];
+	}
+
+	Vector2 x = Li[n-1] * H[n-1]; // x[n-1]
+	memcpy(m_proposal.data(), m_vertices.data(), sizeof(m_proposal[0]) * m_vertices.size());
+	SimpleVertex& v = m_proposal[n-1];
+	const SimpleVertex& vo = m_vertices[n-1];
+	v.p = vo.p + (vo.dpdu * x.x + vo.dpdv * x.y) * stepSize;
+	for (int k = n-2; k>0; k--) {
+		x = Li[k] * (H[k] - m_vertices[k].c * x); // x[k] = (.. x[k+1])
+		SimpleVertex& v = m_proposal[k];
+		const SimpleVertex& vo = m_vertices[k];
+		v.p = vo.p + (vo.dpdu * x.x + vo.dpdv * x.y) * stepSize;
+	}
+	return true;
+}
+
+/**
+ * \brief Computes the error between two directions in the projected
+ * solid angle domain.
+ *
+ * \param h0
+ *     Direction represented using 2D Euclidean coordinates
+ *     for the intersection with the plane at z=1 (similar to
+ *     stereographic projection)
+ * \param h1
+ *     A unit vector
+ */
+static inline Float angError(const Vector2 &h0, const Vector &h1) {
+	const Vector dh = normalize(Vector3(h0.x, h0.y, 1.0f)) - h1;
+	return std::sqrt(dh.x*dh.x + dh.y*dh.y);
+}
+
+bool PathManifold::find(const vector_hv& h_tg) {
+	const int k = (int) m_vertices.size() + 1;
+	/* Nothing to do */
+	if (k < 4)
+		return true;
+	const int numConstraints = k-3;
+	int b, a; // outside declaration to not jump over it with the label.
+
+	/* Statistics */
+	statsAvgManifoldSize.incrementBase();
+	statsAvgManifoldSize += m_vertices.size();
+	statsMaxManifold.recordMaximum(m_vertices.size());
+	statsSuccessfulWalks.incrementBase();
+	statsAvgIterations.incrementBase();
+
+	/* Initial error */
+	Float lastError = 0.f;
+	for (int j = 0; j<numConstraints; ++j) {
+		/* Compute projected half-vector difference */
+		const SimpleVertex& v = m_vertices[j+1];
+		const Float currentErr = angError(h_tg[j], v.m);
+		lastError = std::max(lastError, currentErr);
+	}
+	/* Nothing to do */
+	// TODO: return false to avoid drifting?
+	if (lastError < MTS_MANIFOLD_HV_EPSILON) {
+		++statsSuccessfulWalks;
+		return true;
+	}
+
+	m_proposal.resize(m_vertices.size());
+
+	/* Decide on the projection direction */
+	int step=1; // always trace from light
+	a = step < 0 ? numConstraints-1 : 0; b = numConstraints-1 - a + step;
+
+	/* Iterate predictor-corrector scheme */
+	m_iterations = 0;
+	Float stepSize = 1;
+	while(m_iterations < m_maxIterations) {
+		++m_iterations;
+		++statsAvgIterations;
+		Float maxError = 0;
+		bool doneTg;
+
+		statsNonManifold.incrementBase();
+		statsStepTooFar.incrementBase();
+		statsStepFailed.incrementBase();
+		statsStepSuccess.incrementBase();
+
+		/* Try to convert a set of half-vectors to positions */
+		if (!halfvectorsToPositions(h_tg, stepSize))
+			goto failure;
+
+		/* Project vertices to surfaces */
+		for (int j = a; j!=b; j += step) {
+			const SimpleVertex& vp = m_proposal[j+1-step];
+			SimpleVertex& v = m_proposal[j+1];
+
+			if (v.type == EReflection || v.type == ERefraction) {
+				/* Try to project it to surface along the old incident direction */
+				/* Reject in a patalogic case of collapsing vertices */
+				if (v.p == vp.p)
+					return false;
+				const Vector dir = normalize(v.p - vp.p);
+				Ray r(vp.p, dir, m_time);
+				Intersection its;
+				if (!m_scene->rayIntersect(r, its) || its.getBSDF() != v.object) {
+					++statsStepFailed;
+					goto failure;
+				}
+
+				/* Update vertex intersection and local geometric derivatives */
+				v.p = its.p;
+				its.getBSDF()->getFrame(its, v.shFrame);
+				its.getBSDF()->getFrameDerivative(its, v.shFrameDu, v.shFrameDv);
+				v.dpdu = its.dpdu;
+				v.dpdv = its.dpdv;
+			} else {
+				Log(EError, "Participating media is not supported");
+				return false;
+			}
+		}
+
+		/* Update half-vectors of the proposal and its manifold derivatives */
+		// TODO: update derivatives only for succeeded walks, separate half vectors update and do it here
+		m_proposal.swap(m_vertices);
+		doneTg = computeDerivatives();
+		m_proposal.swap(m_vertices);
+		if (!doneTg) {
+			++statsNonManifold;
+			goto failure;
+		}
+
+		/* Compute maximum error */
+		maxError = 0;
+		for (int j = 0; j<numConstraints; ++j) {
+			/* Compute projected half-vector difference */
+			const SimpleVertex& v = m_proposal[j+1];
+			maxError = std::max(maxError, angError(h_tg[j], v.m));
+		}
+
+		if (maxError > lastError) {
+			++statsStepTooFar;
+			goto failure;
+		}
+
+		/* Accept the try */
+		m_proposal.swap(m_vertices);
+		++statsStepSuccess;
+
+		if (maxError < MTS_MANIFOLD_HV_EPSILON) {
+			/* The manifold walk converged. */
+			++statsSuccessfulWalks;
+			statsAvgIterationsSuccess.incrementBase();
+			statsAvgIterationsSuccess += m_iterations;
+			statsMaxIterationsSuccess.recordMaximum(m_iterations);
+			return true;
+		}
+
+		lastError = maxError;
+		/* Increase the step size */
+		stepSize = std::min((Float)1.0f, stepSize * (Float)2.0f);
+		continue;
+failure:
+		/* Reduce the step size */
+		stepSize *= (Float)0.5f;
+	}
+
+	return false;
+}
+
+bool PathManifold::update(Path &path, int start, int end) const {
 	int step;
 	ETransportMode mode;
 
@@ -648,6 +846,8 @@ bool SpecularManifold::update(Path &path, int start, int end) {
 	if (m_vertices[0].type == EPinnedDirection)
 		last = std::max(last, 1);
 
+	statsUpdateFailed.incrementBase();
+
 	for (int j=0, i=start; j < last; ++j, i += step) {
 		const SimpleVertex
 			&v = m_vertices[j],
@@ -660,7 +860,7 @@ bool SpecularManifold::update(Path &path, int start, int end) {
 
 		int predEdgeIdx = (mode == EImportance) ? i-step : i-step-1;
 		PathEdge *predEdge = path.edgeOrNull(predEdgeIdx),
-		         *succEdge = path.edge(predEdgeIdx + step);
+				 *succEdge = path.edge(predEdgeIdx + step);
 
 		Vector d = vn.p - v.p;
 		Float length = d.length();
@@ -756,7 +956,7 @@ bool SpecularManifold::update(Path &path, int start, int end) {
 	return true;
 }
 
-Float SpecularManifold::det(const Path &path, int a, int b, int c) {
+Float PathManifold::det(const Path &path, int a, int b, int c) {
 	int k = path.length();
 
 	if (a == 0 || a == k)
@@ -781,14 +981,13 @@ Float SpecularManifold::det(const Path &path, int a, int b, int c) {
 	SimpleVertex &vb = m_vertices[b_idx];
 	const PathVertex *pb = path.vertex(b);
 
-	if (pb->isMediumInteraction()) {
-		vb.n = Vector(path.edge(a < b ? (b-1) : b)->d);
-	} else {
-		vb.n = pb->getShadingNormal();
-	}
-	coordinateSystem(vb.n, vb.dpdu, vb.dpdv);
+	vb.shFrame = Frame(pb->isOnSurface() ?
+		pb->getShadingNormal() : Normal(path.edge(a < b ? (b-1) : b)->d));
 
-	if (!computeTangents()) {
+	vb.dpdu = vb.shFrame.s;
+	vb.dpdv = vb.shFrame.n;
+
+	if (!computeDerivatives() || !computeTransferMatrices()) {
 		Log(EWarn, "Could not compute tangents!");
 		return 0.0f;
 	}
@@ -796,6 +995,8 @@ Float SpecularManifold::det(const Path &path, int a, int b, int c) {
 	m_vertices[b_idx].a.setZero();
 	m_vertices[b_idx].b.setIdentity();
 	m_vertices[b_idx].c.setZero();
+
+	statsFullMxInversion.incrementBase();
 
 	if (nSpecular == 0) {
 		/* The chain only consists of glossy vertices -- simply compute the
@@ -807,18 +1008,21 @@ Float SpecularManifold::det(const Path &path, int a, int b, int c) {
 		Matrix2x2 Di(0.0f), D = m_vertices[1].b;
 
 		Float det = D.det();
+		Float area = cross(m_vertices[1].dpdu, m_vertices[1].dpdv).length();
 		for (size_t i=2; i<m_vertices.size()-1; ++i) {
-			if (!D.invert(Di)) {
+			if (!D.invert2x2(Di)) {
 				Log(EWarn, "Could not invert matrix!");
 				return 0.0f;
 			}
 
 			D = m_vertices[i].b - m_vertices[i].a * Di * m_vertices[i-1].c;
 			det *= D.det();
+			area *= cross(m_vertices[i].dpdu, m_vertices[i].dpdv).length();
 		}
 
-		return std::abs(1 / det);
+		return std::abs(area / det);
 	} else {
+		++statsFullMxInversion;
 		/* The chain contains both glossy and specular materials. Compute the
 		   determinant of A^-1, where rows corresponding to specular vertices
 		   have been crossed out. The performance of the following is probably
@@ -852,7 +1056,12 @@ Float SpecularManifold::det(const Path &path, int a, int b, int c) {
 		/* Compute the inverse and "cross out" irrelevant columns and rows */
 		Eigen::Matrix<Float, Eigen::Dynamic, Eigen::Dynamic> Ai = A.inverse();
 
+		Float area = 1.f;
+		
 		for (int i=0; i<nGlossy+nSpecular; ++i) {
+			
+			area *= cross(m_vertices[i+1].dpdu, m_vertices[i+1].dpdv).length();
+			
 			if (!m_vertices[i+1].degenerate)
 				continue;
 
@@ -864,11 +1073,30 @@ Float SpecularManifold::det(const Path &path, int a, int b, int c) {
 			Ai.block<2,2>(2*i, 2*i).setIdentity();
 		}
 
-		return std::abs(Ai.determinant());
+		return std::abs(Ai.determinant()) * area;
 	}
 }
 
-Float SpecularManifold::multiG(const Path &path, int a, int b) {
+Float PathManifold::fullG(const Path &path) {
+	/* The the full-path-length generalized geometric term (transfer matrix + the first geo term) */
+	const Vector d = path.edge(1)->d;
+	const Float len = path.edge(1)->length;
+
+	/* Transfer matrix determinant + the inverse square distance of the first edge */
+	Float det = cross(m_vertices[1].map(1, 0), m_vertices[1].map(0, 1)).length() / (len*len);
+
+	/* The remaining cosines of the geometric term in case of surface interaction */
+	if (path.vertex(1)->isOnSurface())
+		det *= dot(d, path.vertex(1)->getShadingNormal());
+
+	if (path.vertex(2)->isOnSurface())
+		det *= dot(d, path.vertex(2)->getShadingNormal());
+
+	/* Return the determinant */
+	return std::abs(det);
+}
+
+Float PathManifold::multiG(const Path &path, int a, int b) {
 	if (a == 0)
 		++a;
 	else if (a == path.length())
@@ -897,7 +1125,7 @@ Float SpecularManifold::multiG(const Path &path, int a, int b) {
 	return result;
 }
 
-Float SpecularManifold::G(const Path &path, int a, int b) {
+Float PathManifold::G(const Path &path, int a, int b) {
 	if (std::abs(a-b) == 1) {
 		if (a > b)
 			std::swap(a, b);
@@ -914,17 +1142,17 @@ Float SpecularManifold::G(const Path &path, int a, int b) {
 
 	SimpleVertex &last = m_vertices[m_vertices.size()-1];
 	const PathVertex *vb = path.vertex(b);
-	if (!vb->isOnSurface()) {
-		last.n = Vector(path.edge(a < b ? (b-1) : b)->d);
-	} else {
-		last.n = vb->getShadingNormal();
-	}
-	coordinateSystem(last.n, last.dpdu, last.dpdv);
+
+	last.shFrame = Frame(vb->isOnSurface() ?
+		vb->getShadingNormal() : Normal(path.edge(a < b ? (b-1) : b)->d));
+
+	last.dpdu = last.shFrame.s;
+	last.dpdv = last.shFrame.t;
 
 	statsNonManifold.incrementBase();
-	if (!computeTangents()) {
+	if (!computeDerivatives() || !computeTransferMatrices()) {
 		++statsNonManifold;
-		Log(EWarn, "SpecularManifold::evalG(): non-manifold configuration!");
+		Log(EWarn, "SpecularPathManifold::evalG(): non-manifold configuration!");
 		return 0;
 	}
 
@@ -950,7 +1178,45 @@ Float SpecularManifold::G(const Path &path, int a, int b) {
 	return result;
 }
 
-std::string SpecularManifold::SimpleVertex::toString() const {
+/* Take the mean roughness of the surface BSDF as its Beckmann equivalent. */
+Float PathManifold::getEffectiveRoughness(const PathVertex *vertex) {
+	/// TODO: rewrite when BSDF::getEffectiveAlbedo(int component) exists
+	if (!vertex->isConnectable())
+		return 0;
+	const Intersection &its = vertex->getIntersection();
+	const BSDF *bsdf = its.getBSDF();
+
+	Float roughness = 0;
+	int roughnessSamples = 0;
+	for (int k=0; k<bsdf->getComponentCount(); ++k) {
+		const int bsdfType = bsdf->getType(k);
+		if ((bsdfType & vertex->getComponentType()) == 0)
+			continue;
+		/* For diffuse take the roughness as 1 (instead of infinity) */
+		if ((bsdfType & BSDF::EDiffuse)) {
+			if (!bsdf->getDiffuseReflectance(its).isZero()) {
+				/* Heuristic roughness value that will cause diffuse materials to be explored well */
+				roughness += 1000.f; /* Roughness of one for diffuse */
+				roughnessSamples++;
+			}
+		} else if (bsdfType & BSDF::EGlossy) {
+			/* For rough/glossy materials just query its roughness */
+			roughness += bsdf->getRoughness(its, k);
+			roughnessSamples++;
+		} else {
+			/* Unhandled case */
+			BDAssert(bsdf->getComponentCount() > 1);
+		}
+	}
+	/* Average the accumulated roughness */
+	BDAssert(roughnessSamples > 0);
+	if (roughnessSamples > 1)
+		roughness /= roughnessSamples;
+	BDAssert(roughness > 1e-30f);
+	return roughness;
+}
+
+std::string PathManifold::SimpleVertex::toString() const {
 	std::ostringstream oss;
 
 	oss << "SimpleVertex[" << endl
@@ -968,12 +1234,14 @@ std::string SpecularManifold::SimpleVertex::toString() const {
 
 	oss << "," << endl
 		<< "  p = " << p.toString() << "," << endl
-		<< "  n = " << n.toString() << "," << endl
+		<< "  n = " << shFrame.n.toString() << "," << endl
 		<< "  m = " << m.toString() << "," << endl
+		<< "  roughness = " << roughness << "," << endl
 		<< "  dpdu = " << dpdu.toString() << "," << endl
 		<< "  dpdv = " << dpdv.toString() << "," << endl
-		<< "  dndu = " << dndu.toString() << "," << endl
-		<< "  dndv = " << dndv.toString() << "," << endl
+		<< "  shFrame = " << shFrame.toString() << "," << endl
+		<< "  shFrameDu = " << shFrameDu.toString() << "," << endl
+		<< "  shFrameDv = " << shFrameDv.toString() << "," << endl
 		<< "  eta = " << eta << "," << endl
 		<< "  object = " << (object ? indent(object->toString()).c_str() : "null") << endl
 		<< "]";
@@ -981,7 +1249,7 @@ std::string SpecularManifold::SimpleVertex::toString() const {
 	return oss.str();
 }
 
-std::string SpecularManifold::toString() const {
+std::string PathManifold::toString() const {
 	std::ostringstream oss;
 
 	oss << "SpecularManifold[" << endl;
@@ -996,5 +1264,6 @@ std::string SpecularManifold::toString() const {
 	return oss.str();
 }
 
-MTS_IMPLEMENT_CLASS(SpecularManifold, false, Object)
+MTS_IMPLEMENT_CLASS(PathManifold, false, Object)
+
 MTS_NAMESPACE_END

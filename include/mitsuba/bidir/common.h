@@ -72,8 +72,7 @@ class MemoryPool;
 class SeedWorkUnit;
 class PathSampler;
 class Mutator;
-class PathSolver;
-class SpecularManifold;
+class PathManifold;
 
 MTS_NAMESPACE_END
 

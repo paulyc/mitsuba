@@ -41,6 +41,7 @@ public:
 		ECausticPerturbation,
 		EMultiChainPerturbation,
 		EManifoldPerturbation,
+		EHalfvectorPerturbation,
 		EMutationTypeCount
 	};
 
@@ -138,17 +139,29 @@ extern MTS_EXPORT_BIDIR std::ostream &operator<<(
 		std::ostream &os, const Mutator::EMutationType &type);
 
 /**
- * \brief Medium-aware mutator base class
+ * \brief Mutator base class with building blocks for surface and medium perturbations
  */
 class MTS_EXPORT_BIDIR MutatorBase : public Mutator {
 public:
 	MTS_DECLARE_CLASS()
 protected:
 	/// Protected constructor
-	MutatorBase();
+	MutatorBase(const Scene *scene, Sampler *sampler, MemoryPool &pool);
 
 	/// Virtual destructor
 	virtual ~MutatorBase() { }
+	
+	// Flags for subpath peturbation
+	enum PerturbationFlags {
+		EPerturbAllDistances	= 0x1,	// Perturb distances at all subpath vertices
+		EPreserveManifold		= 0x2,	// Fails if the scene objects of a perturbed path don't match the source path 
+	};
+	
+	/// Perturb a direction at vertex a and trace a perturbed subpath until a new vertex b
+	bool perturbSubpath(const Path& source, Path& proposal, int a, int b, int perturbFlags);
+	
+	// Throughput of a subpath from a to b
+	Spectrum subpathThroughput(const Path& source, const Path& proposal, int a, int b, int perturbFlags) const;
 
 	/// Perturb a distance within a medium
 	Float perturbMediumDistance(Sampler *sampler,
@@ -159,6 +172,10 @@ protected:
 		const PathEdge *oldEdge, const PathEdge *newEdge) const;
 
 protected:
+	ref<const Scene> m_scene;
+	ref<Sampler> m_sampler;
+	MemoryPool &m_pool;
+	
 	Float m_mediumDensityMultiplier;
 };
 

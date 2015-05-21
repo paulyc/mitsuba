@@ -172,6 +172,7 @@ void SceneLoader::run() {
 			m_result->pathLength = m_result->detectPathLength();
 			m_result->showKDTree = false;
 			m_result->shownKDTreeLevel = 0;
+	  m_result->showDebugVis = false;
 		}
 	} catch (const std::exception &e) {
 		m_error = e.what();

@@ -148,9 +148,9 @@ public:
 		m_config.luminanceSamples = props.getInteger("luminanceSamples", 15000);
 
 		/* Selectively enable/disable the bidirectional mutation. This is
-		   probably not desireable for ERPT, since the path tracing stage is
+		   probably not desirable for ERPT, since the path tracing stage is
 		   responsible for generating good seed paths.. */
-		m_config.bidirectionalMutation = props.getBoolean("bidirectionalMutation", false);
+		m_config.bidirectionalMutation = props.getBoolean("bidirectionalMutation", true);
 
 		/* Selectively enable/disable the lens perturbation */
 		m_config.lensPerturbation = props.getBoolean("lensPerturbation", true);
@@ -166,6 +166,9 @@ public:
 		m_config.probFactor = props.getFloat("probFactor", props.getFloat("lambda", 50));
 		m_config.avgAngleChangeSurface = props.getFloat("avgAngleChangeSurface", 0);
 		m_config.avgAngleChangeMedium = props.getFloat("avgAngleChangeMedium", 0);
+
+		/* Selectively enable/disable the half vector space perturbation */
+		m_config.halfvectorPerturbation = props.getBoolean("halfvectorPerturbation", false);
 
 		if (m_config.maxDepth <= 0 && m_config.maxDepth != -1)
 			Log(EError, "'maxDepth' must be set to -1 (infinite) or a value greater than zero!");

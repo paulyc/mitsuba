@@ -21,6 +21,7 @@
 #include <mitsuba/bidir/mut_caustic.h>
 #include <mitsuba/bidir/mut_mchain.h>
 #include <mitsuba/bidir/mut_manifold.h>
+#include <mitsuba/bidir/mut_halfvector.h>
 #include <mitsuba/bidir/util.h>
 #include "mlt_proc.h"
 
@@ -33,11 +34,49 @@ static StatsCounter statsAccepted("Path Space MLT",
 static StatsCounter forcedAcceptance("Path Space MLT",
 		"Number of forced acceptances");
 
+namespace
+{
+	struct DebugVertex {
+		Point p;
+		Spectrum c;
+	};
+	struct DebugVis {
+		enum { bufferSize = 500 };
+		
+		std::vector<DebugVertex> paths[bufferSize];
+		int num_paths;
+		int current_head;
+		ImageBlock *image;
+		bool capture;
+		DebugVis() : num_paths(0), current_head(-1), capture(false) { }
+	};
+}
+
+static Spectrum hue_colormap(const Float v, const Float range_min = (Float)0, const Float range_max = (Float)1) {
+	const Float t = math::clamp((range_max - v)/(range_max - range_min), (Float)0, (Float)1);
+	const Float H1 = math::clamp(t, (Float)0, (Float)1) * 4;
+	const Float X = math::clamp(1.f-std::abs(std::fmod(H1, (Float)2) - (Float)1), (Float)0, (Float)1);
+
+	Spectrum color;
+	if(H1<1)
+		color.fromLinearRGB(1, X, 0);
+	else if(H1<2)
+		color.fromLinearRGB(X, 1, 0);
+	else if(H1<3)
+		color.fromLinearRGB(0, 1, X);
+	else
+		color.fromLinearRGB(0, X, 1);
+
+	return color;
+}
+
 /* ==================================================================== */
 /*                         Worker implementation                        */
 /* ==================================================================== */
 
 class MLTRenderer : public WorkProcessor {
+protected:
+  DebugVis debugVisData;
 public:
 	MLTRenderer(const MLTConfiguration &conf)
 		: m_config(conf) {
@@ -46,6 +85,11 @@ public:
 	MLTRenderer(Stream *stream, InstanceManager *manager)
 		: WorkProcessor(stream, manager) {
 		m_config = MLTConfiguration(stream);
+	}
+
+	~MLTRenderer() {
+		if(m_scene && m_scene->getDebugVisData() == &debugVisData)
+			m_scene->setDebugVisData(NULL);
 	}
 
 	void serialize(Stream *stream, InstanceManager *manager) const {
@@ -108,6 +152,9 @@ public:
 		if (m_config.manifoldPerturbation)
 			m_mutators.push_back(new ManifoldPerturbation(m_scene, m_sampler, *m_pool,
 				m_config.probFactor, true, true));
+
+		if (m_config.halfvectorPerturbation)
+			m_mutators.push_back(new HalfvectorPerturbation(m_scene, m_sampler, *m_pool, m_config.probFactor));
 
 		if (m_mutators.size() == 0)
 			Log(EError, "There must be at least one mutator!");
@@ -207,7 +254,7 @@ public:
 				Float a;
 				if (!m_config.importanceMap) {
 					if(Qxy > RCPOVERFLOW)
-					a = std::min((Float) 1, Qyx / Qxy);
+						a = std::min((Float) 1, Qyx / Qxy);
 					else
 						a = 0.f;
 				} else {
@@ -258,6 +305,39 @@ public:
 					Spectrum value = relWeight * accumulatedWeight;
 					if (!value.isZero())
 						result->put(current->getSamplePosition(), &value[0]);
+
+#ifdef MTS_DEBUG
+					if(!m_scene->getDebugVisData())
+						m_scene->setDebugVisData(&debugVisData);
+					// Debug path visualization
+					if(proposed->length() > 2 && m_scene->getDebugVisData() == &debugVisData
+						/* && muRec.type == Mutator::EHalfvectorPerturbation*/) {
+						//HalfvectorPerturbation* hv = (HalfvectorPerturbation*)mutator;
+
+						// Add a path
+						debugVisData.num_paths = std::min((int)DebugVis::bufferSize, debugVisData.num_paths+1);
+						debugVisData.current_head++;
+						debugVisData.current_head = debugVisData.current_head % DebugVis::bufferSize;
+
+						const int cur_path = debugVisData.current_head;
+						std::vector<DebugVertex>& dPath = debugVisData.paths[cur_path];
+
+						/*std::vector<Float>& dd = hv->m_breakupDets;
+						Float dd_max = 0.f;
+						for(int y=0;y<dd.size();++y)
+							dd_max = std::max(dd_max, dd[y]);
+						BDAssert(proposed->length()-2 == dd.size()+1);*/
+
+						dPath.resize(proposed->length()-1);
+						for(int i = 0;i<proposed->length()-1;++i) {
+							dPath[i].p = proposed->vertex(i+1)->getPosition();
+							Spectrum vl(1.f);
+							//if(i>0 && i<proposed->length()-2)
+							//	vl = hue_colormap(dd[i-1] / dd_max);
+							dPath[i].c = vl;
+						}
+					}
+#endif
 
 					/* The mutation was accepted */
 					std::swap(current, proposed);
@@ -334,7 +414,7 @@ MLTProcess::MLTProcess(const RenderJob *parent, RenderQueue *queue,
 	m_resultMutex = new Mutex();
 	m_resultCounter = 0;
 	m_workCounter = 0;
-	m_refreshTimeout = 1;
+	m_refreshTimeout = 500;
 }
 
 ref<WorkProcessor> MLTProcess::createWorkProcessor() const {

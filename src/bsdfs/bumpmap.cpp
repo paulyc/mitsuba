@@ -132,7 +132,7 @@ public:
 		}
 	}
 
-	Frame getFrame(const Intersection &its) const {
+	void getFrame(const Intersection &its, Frame &result) const {
 		Spectrum grad[2];
 		m_displacement->evalGradient(its, grad);
 
@@ -146,7 +146,6 @@ public:
 		Vector dpdv = its.dpdv + its.shFrame.n * (
 				dDispDv - dot(its.shFrame.n, its.dpdv));
 
-		Frame result;
 		result.n = normalize(cross(dpdu, dpdv));
 		result.s = normalize(dpdu - result.n
 			* dot(result.n, dpdu));
@@ -154,14 +153,16 @@ public:
 
 		if (dot(result.n, its.geoFrame.n) < 0)
 			result.n *= -1;
+	}
 
-		return result;
+	void getFrameDerivative(const Intersection &its, Frame &du, Frame &dv) const {
+		NotImplementedError("getFrameDerivative");
 	}
 
 	Spectrum eval(const BSDFSamplingRecord &bRec, EMeasure measure) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed,
 			perturbed.toLocal(its.toWorld(bRec.wi)),
@@ -177,7 +178,7 @@ public:
 	Float pdf(const BSDFSamplingRecord &bRec, EMeasure measure) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed,
 			perturbed.toLocal(its.toWorld(bRec.wi)),
@@ -194,7 +195,7 @@ public:
 	Spectrum sample(BSDFSamplingRecord &bRec, const Point2 &sample) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed, bRec.sampler, bRec.mode);
 		perturbedQuery.wi = perturbed.toLocal(its.toWorld(bRec.wi));
@@ -216,7 +217,7 @@ public:
 	Spectrum sample(BSDFSamplingRecord &bRec, Float &pdf, const Point2 &sample) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed, bRec.sampler, bRec.mode);
 		perturbedQuery.wi = perturbed.toLocal(its.toWorld(bRec.wi));

@@ -32,6 +32,7 @@ ShapeKDTree::ShapeKDTree() {
 	m_triAccel = NULL;
 #endif
 	m_shapeMap.push_back(0);
+	m_visData = NULL;
 }
 
 ShapeKDTree::~ShapeKDTree() {

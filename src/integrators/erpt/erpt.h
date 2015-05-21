@@ -42,6 +42,7 @@ struct ERPTConfiguration {
 	bool lensPerturbation;
 	bool multiChainPerturbation;
 	bool manifoldPerturbation;
+  bool halfvectorPerturbation;
 	Float probFactor;
 	size_t chainLength;
 	Float numChains;
@@ -66,6 +67,8 @@ struct ERPTConfiguration {
 			oss << "multiChain ";
 		if (manifoldPerturbation)
 			oss << "manifold ";
+	if (halfvectorPerturbation)
+	  oss << "halfVector ";    
 		SLog(EDebug, "ERPT configuration:");
 		SLog(EDebug, "   Maximum path length         : %i", maxDepth);
 		SLog(EDebug, "   Chain length                : " SIZE_T_FMT, chainLength);
@@ -91,6 +94,7 @@ struct ERPTConfiguration {
 		lensPerturbation = stream->readBool();
 		multiChainPerturbation = stream->readBool();
 		manifoldPerturbation = stream->readBool();
+	halfvectorPerturbation = stream->readBool();    
 		probFactor = stream->readFloat();
 		chainLength = stream->readSize();
 		numChains = stream->readFloat();
@@ -111,6 +115,7 @@ struct ERPTConfiguration {
 		stream->writeBool(lensPerturbation);
 		stream->writeBool(multiChainPerturbation);
 		stream->writeBool(manifoldPerturbation);
+		stream->writeBool(halfvectorPerturbation);
 		stream->writeFloat(probFactor);
 		stream->writeSize(chainLength);
 		stream->writeFloat(numChains);

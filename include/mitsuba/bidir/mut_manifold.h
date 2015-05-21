@@ -88,10 +88,7 @@ protected:
 
 	int getSpecularChainEnd(const Path &path, int pos, int step);
 protected:
-	ref<const Scene> m_scene;
-	ref<Sampler> m_sampler;
-	mutable ref<SpecularManifold> m_manifold;
-	MemoryPool &m_pool;
+	mutable ref<PathManifold> m_manifold;
 	Float m_probFactor, m_probFactor2;
 	bool m_enableOffsetManifolds;
 	bool m_enableSpecularMedia;

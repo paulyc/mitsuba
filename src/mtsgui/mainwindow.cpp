@@ -1240,6 +1240,7 @@ void MainWindow::on_actionRenderSettings_triggered() {
 	m_activeWindowHack = true;
 	dialog->show();
 	qApp->processEvents();
+	dialog->setMinimumHeight(630);
 	m_activeWindowHack = false;
 }
 
@@ -1492,6 +1493,7 @@ void MainWindow::on_actionRender_triggered() {
 	if (context->renderJob != NULL || scene == NULL)
 		return;
 
+  scene->setDebugVisData(NULL);
 	scene->setBlockSize(m_blockSize);
 
 	if (m_renderQueue->getJobCount() == 0)
@@ -1735,7 +1737,7 @@ void MainWindow::onSaveAsDialogClose(int reason) {
 	QFileDialog *dialog = static_cast<QFileDialog *>(sender());
 	m_currentChild = NULL;
 	if (reason == QDialog::Accepted) {
-        QString fileName = dialog->selectedFiles().value(0);
+		QString fileName = dialog->selectedFiles().value(0);
 		settings.setValue("fileDialogState", dialog->saveState());
 		saveSceneAs(fileName);
 	}
@@ -2153,6 +2155,7 @@ SceneContext::SceneContext(SceneContext *ctx) {
 	diffuseSources = ctx->diffuseSources;
 	showKDTree = ctx->showKDTree;
 	shownKDTreeLevel = ctx->shownKDTreeLevel;
+  showDebugVis = ctx->showDebugVis;
 	selectedShape = ctx->selectedShape;
 	selectionMode = ctx->selectionMode;
 	originalSize = ctx->originalSize;

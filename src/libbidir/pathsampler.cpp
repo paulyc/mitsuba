@@ -31,7 +31,7 @@ PathSampler::PathSampler(ETechnique technique, const Scene *scene, Sampler *sens
 	: m_technique(technique), m_scene(scene), m_emitterSampler(emitterSampler),
 	  m_sensorSampler(sensorSampler), m_directSampler(directSampler), m_maxDepth(maxDepth),
 	  m_rrDepth(rrDepth), m_excludeDirectIllum(excludeDirectIllum), m_sampleDirect(sampleDirect),
-      m_lightImage(lightImage) {
+	  m_lightImage(lightImage) {
 
 	if (technique == EUnidirectional) {
 		/* Instantiate a volumetric path tracer */
@@ -356,11 +356,14 @@ void PathSampler::samplePaths(const Point2i &offset, PathCallback &callback) {
 	PathEdge tempEdge, connectionEdge;
 	Point2 samplePos(0.0f);
 
+	// XXX debug with this
+	const int minDepth = 0;
+
 	for (int s = (int) m_emitterSubpath.vertexCount()-1; s >= 0; --s) {
 		/* Determine the range of sensor vertices to be traversed,
 		   while respecting the specified maximum path length */
-		int minT = std::max(2-s, m_lightImage ? 0 : 2),
-		    maxT = (int) m_sensorSubpath.vertexCount() - 1;
+		int minT = std::max(2-s, m_lightImage ? minDepth : (minDepth+2)),
+			maxT = (int) m_sensorSubpath.vertexCount() - 1;
 		if (m_maxDepth != -1)
 			maxT = std::min(maxT, m_maxDepth + 1 - s);
 
@@ -384,7 +387,7 @@ void PathSampler::samplePaths(const Point2i &offset, PathCallback &callback) {
 
 			/* Allowed remaining number of ENull vertices that can
 			   be bridged via pathConnect (negative=arbitrarily many) */
-			int remaining = m_maxDepth - depth;
+			int remaining = m_maxDepth - depth - minDepth;
 
 			/* Will receive the path weight of the (s, t)-connection */
 			Spectrum value;
@@ -688,8 +691,8 @@ static void reconstructCallback(const PathSeed &seed, const Bitmap *importanceMa
 			weight /= luminanceValues[intPos.x + intPos.y * size.x];
 		}
 
-		if (seed.luminance != weight)
-			SLog(EError, "Internal error in reconstructPath(): luminances "
+		if (std::abs(seed.luminance - weight) > 1e-3 * std::abs(std::min(seed.luminance, weight)))
+			SLog(EWarn, "Internal error in reconstructPath(): luminances "
 				"don't match (%f vs %f)!", weight, seed.luminance);
 		path.clone(result, pool);
 	}

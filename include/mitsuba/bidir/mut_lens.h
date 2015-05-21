@@ -76,9 +76,6 @@ protected:
 	/// Virtual destructor
 	virtual ~LensPerturbation();
 protected:
-	ref<const Scene> m_scene;
-	ref<Sampler> m_sampler;
-	MemoryPool &m_pool;
 	Vector2 m_filmRes;
 	Float m_r1, m_r2;
 	Float m_logRatio;

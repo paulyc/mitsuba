@@ -210,7 +210,26 @@ struct MTS_EXPORT_BIDIR PathVertex {
 	 * Once C++11 is widely supported across all target platforms, this
 	 * should be replaced by an unrestricted union.
 	 */
+#if (__cplusplus <= 199711L) || _MSC_VER < 1800
 	uint8_t data[EDataSize];
+#else
+	//#define __UNION_MEMBER(x) struct { x; }
+#define __UNION_MEMBER(x) x
+	union Data
+	{
+		/// The endpoint record associated with this node (const)
+		__UNION_MEMBER(EndpointRecord          endpointRecord);
+		/// The position sampling record associated with this node
+		__UNION_MEMBER(PositionSamplingRecord  positionSamplingRecord);
+		/// The intersection record associated with this node
+		__UNION_MEMBER(Intersection            intersection);
+		/// The medium sampling record associated with this node
+		__UNION_MEMBER(MediumSamplingRecord    mediumSamplingRecord);
+
+		Data() {}
+	} data[1];
+#undef __UNION_MEMBER
+#endif
 
 	//! @}
 	/* ==================================================================== */

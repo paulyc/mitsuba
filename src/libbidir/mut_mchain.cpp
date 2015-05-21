@@ -28,7 +28,7 @@ static StatsCounter statsGenerated("Multi-chain perturbation",
 
 MultiChainPerturbation::MultiChainPerturbation(const Scene *scene, Sampler *sampler,
 		MemoryPool &pool, Float minJump, Float coveredArea) :
-	m_scene(scene), m_sampler(sampler), m_pool(pool) {
+	MutatorBase(scene, sampler, pool) {
 
 	if (!scene->getSensor()->getClass()->derivesFrom(MTS_CLASS(PerspectiveCamera)))
 		Log(EError, "The multi-chain perturbation requires a perspective camera.");
@@ -219,8 +219,15 @@ Float MultiChainPerturbation::Q(const Path &source, const Path &proposal,
 			weight /= pdfMediumPerturbation(source.vertex(i-1),
 					source.edge(i-1), edge);
 	}
-
-	return 1.0f / weight.getLuminance();
+	
+	Float lum = weight.getLuminance();
+	
+	if (lum <= RCPOVERFLOW || !std::isfinite(lum)) {
+		Log(EWarn, "Internal error in multichain perturbation: luminance = %f!", lum);
+		return 0.f;
+	}
+	
+	return 1.0f / lum;
 }
 
 void MultiChainPerturbation::accept(const MutationRecord &) {

@@ -34,6 +34,7 @@ Scene::Scene()
 	m_kdtree = new ShapeKDTree();
 	m_sourceFile = new fs::path();
 	m_destinationFile = new fs::path();
+  m_kdtree->m_visData = NULL;
 }
 
 Scene::Scene(const Properties &props)
@@ -78,6 +79,7 @@ Scene::Scene(const Properties &props)
 		m_kdtree->setMaxBadRefines(props.getInteger("kdMaxBadRefines"));
 	m_sourceFile = new fs::path();
 	m_destinationFile = new fs::path();
+  m_kdtree->m_visData = NULL;
 }
 
 Scene::Scene(Scene *scene) : NetworkedObject(Properties()) {
@@ -123,6 +125,7 @@ Scene::Scene(Stream *stream, InstanceManager *manager)
 	m_environmentEmitter = static_cast<Emitter *>(manager->getInstance(stream));
 	m_sourceFile = new fs::path(stream->readString());
 	m_destinationFile = new fs::path(stream->readString());
+  m_kdtree->m_visData = NULL;
 
 	size_t count = stream->readSize();
 	m_shapes.reserve(count);

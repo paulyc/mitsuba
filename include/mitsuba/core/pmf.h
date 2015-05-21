@@ -101,7 +101,7 @@ public:
 	inline Float normalize() {
 		SAssert(m_cdf.size() > 1);
 		m_sum = m_cdf[m_cdf.size()-1];
-		if (m_sum > 0) {
+		if (m_sum > RCPOVERFLOW) {
 			m_normalization = 1.0f / m_sum;
 			for (size_t i=1; i<m_cdf.size(); ++i)
 				m_cdf[i] *= m_normalization;

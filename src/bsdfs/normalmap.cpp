@@ -104,23 +104,21 @@ public:
 		}
 	}
 
-	Frame getFrame(const Intersection &its) const {
-		Frame result;
+	void getFrame(const Intersection &its, Frame &result) const {
 		Normal n;
 
 		m_normals->eval(its, false).toLinearRGB(n.x, n.y, n.z);
 		for (int i=0; i<3; ++i)
 			n[i] = 2 * n[i] - 1;
 
-		Frame frame = BSDF::getFrame(its);
-		result.n = normalize(frame.toWorld(n));
+		Frame base;
+		BSDF::getFrame(its, base);
+		result.n = normalize(base.toWorld(n));
 
 		result.s = normalize(its.dpdu - result.n
 			* dot(result.n, its.dpdu));
 
 		result.t = cross(result.n, result.s);
-
-		return result;
 	}
 
 	void getFrameDerivative(const Intersection &its, Frame &du, Frame &dv) const {
@@ -136,8 +134,8 @@ public:
 		Spectrum(2*dn[0]).toLinearRGB(dndu.x, dndu.y, dndu.z);
 		Spectrum(2*dn[1]).toLinearRGB(dndv.x, dndv.y, dndv.z);
 
-		Frame base_du, base_dv;
-		Frame base = BSDF::getFrame(its);
+		Frame base, base_du, base_dv;
+		BSDF::getFrame(its, base);
 		BSDF::getFrameDerivative(its, base_du, base_dv);
 
 		Vector worldN = base.toWorld(n);
@@ -167,7 +165,7 @@ public:
 	Spectrum eval(const BSDFSamplingRecord &bRec, EMeasure measure) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed,
 			perturbed.toLocal(its.toWorld(bRec.wi)),
@@ -186,7 +184,7 @@ public:
 	Float pdf(const BSDFSamplingRecord &bRec, EMeasure measure) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed,
 			perturbed.toLocal(its.toWorld(bRec.wi)),
@@ -203,7 +201,7 @@ public:
 	Spectrum sample(BSDFSamplingRecord &bRec, const Point2 &sample) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed, bRec.sampler, bRec.mode);
 		perturbedQuery.wi = perturbed.toLocal(its.toWorld(bRec.wi));
@@ -225,7 +223,7 @@ public:
 	Spectrum sample(BSDFSamplingRecord &bRec, Float &pdf, const Point2 &sample) const {
 		const Intersection& its = bRec.its;
 		Intersection perturbed(its);
-		perturbed.shFrame = getFrame(its);
+		getFrame(its, perturbed.shFrame);
 
 		BSDFSamplingRecord perturbedQuery(perturbed, bRec.sampler, bRec.mode);
 		perturbedQuery.wi = perturbed.toLocal(its.toWorld(bRec.wi));
