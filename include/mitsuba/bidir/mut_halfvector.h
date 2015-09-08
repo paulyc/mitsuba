@@ -25,6 +25,14 @@
 
 MTS_NAMESPACE_BEGIN
 
+struct CachedTransitionPdf
+{
+	Float breakupPdf;
+	Float transferMx;
+	Float totalRoughness;
+	std::vector<Float> vtxRoughtness;
+};
+
 /**
  * \brief Glossy half-vector space perturbation strategy
  *
@@ -78,6 +86,8 @@ public:
 		Matrix2x2 R; // rotation matrix (det = 1) in plane/plane space
 		Vector2   v; // eigenvalues
 	};
+
+	CachedTransitionPdf m_fwPdf, m_bwPdf;
   
 	const Float	m_probFactor;	// Used for perturbing end points
 	mutable ref<PathManifold> m_manifold;

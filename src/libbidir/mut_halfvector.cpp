@@ -162,7 +162,8 @@ static inline Float nonspecularProb(Float alpha, const Vector& h, const Point2& 
 bool HalfvectorPerturbation::computeBreakupProbabilities(const Path& path) const {
 	const int k = path.length();
 	const int numConstraints = k - 3;
-	
+	m_breakupPmf.clear();
+
 	/* Compute all derivatives along the path */
 	m_manifold->init(path, 1, k);
 	if(!m_manifold->computeDerivatives()) {
@@ -229,7 +230,6 @@ bool HalfvectorPerturbation::computeBreakupProbabilities(const Path& path) const
 #endif
 	
 	/* Construct breakup pdf */
-	m_breakupPmf.clear();
 	m_breakupPmf.reserve(numConstraints+1);
 	Float breakup_sum = 0.f;
 
@@ -479,6 +479,14 @@ static inline Float computeTotalRoughness(const PathManifold::SimpleVertex *v, c
 	return totalRoughness;
 }
 
+static inline void cacheRoughness(const ref<PathManifold>& m, CachedTransitionPdf& cachedPdf) {
+	const int numConstraints = (int)m->size() - 2;
+	cachedPdf.vtxRoughtness.resize(numConstraints);
+	for(int j = 0;j<numConstraints;++j)
+		cachedPdf.vtxRoughtness[j] = m->vertex(j+1).roughness;
+	cachedPdf.totalRoughness = computeTotalRoughness(&m->vertex(1), numConstraints);
+}
+
 bool HalfvectorPerturbation::perturbHalfvectors(vector_hv& hs, const Path& source, const int b, const int c) {
 	const int numConstraints = (int)hs.size();
 	BDAssert(m_manifold->size()-2 == (uint64_t)numConstraints);
@@ -552,13 +560,20 @@ bool HalfvectorPerturbation::sampleMutation(
 	muRec = MutationRecord(EHalfvectorPerturbation, 0, k, k, Spectrum(1.f));
 	muRec.extra[0] = a; muRec.extra[1] = b; muRec.extra[2] = c;
 	
-	/* Allocate memory for the proposed path */
-	proposal.clear();
-	source.clone(proposal, m_pool);
+	/* Cache source (forward) breakup probability */
+	m_fwPdf.breakupPdf = 1.f;
+	if(m_breakupPmf.getSum() != 0.f)
+		m_fwPdf.breakupPdf = m_breakupPmf[b-2];
 	
-	// TODO: optimize computation of generalized half-vectors (extract it)
-	m_manifold->init(proposal, c, b);
-	
+	// TODO: trim and init b, c only
+	m_manifold->init(source, c, b);
+
+	/* Cache source (forward) values */
+	cacheRoughness(m_manifold, m_fwPdf);
+	m_manifold->computeDerivatives();
+	m_manifold->computeTransferMatrices();
+	m_fwPdf.transferMx = m_manifold->fullG(source);
+
 	/* Remember source half vectors and convert them into plane-plane domain */
 	const int numConstraints = b-c-1;
 	m_h_orig.resize(numConstraints);
@@ -571,7 +586,11 @@ bool HalfvectorPerturbation::sampleMutation(
 
 	/* Perturb all half-vectors */
 	if(!perturbHalfvectors(m_h_perturbed, source, b, c))
-		goto fail;
+		return false;
+
+	/* Allocate memory for the proposed path */
+	proposal.clear();
+	source.clone(proposal, m_pool);
 
 	/* Perform a lens perturbation for a selected subpath from a to b */
 	if(!perturbLensSubpath(source, proposal, a, b)) {
@@ -582,9 +601,9 @@ bool HalfvectorPerturbation::sampleMutation(
 	statsAvgBreakup.incrementBase();
 	statsAvgBreakup += b;
 	
-	/* Set the perturbed end point and init the manifold */
-	// TODO: here only one endpoint has changed, no need for a full reinit
-	m_manifold->init(proposal, c, b);
+	/* Set the perturbed end point */
+	// TODO: only the 'b' point
+	m_manifold->initEndpoints(proposal.vertex(c), proposal.vertex(c+1), proposal.vertex(b-1), proposal.vertex(b));
 	if(!m_manifold->computeDerivatives()) {
 		Log(EWarn, "Found a non-manifold path: %s", source.toString().c_str());
 		goto fail;
@@ -598,11 +617,36 @@ bool HalfvectorPerturbation::sampleMutation(
 	if(!m_manifold->update(proposal, c, b))
 		goto fail;
 
+	/* Connect the last vertex */
+	statsConnectionFailed.incrementBase();
+	v_p = proposal.vertexOrNull(b-2);
+	vs = proposal.vertex(b-1);
+	vt = proposal.vertex(b);
+	v_n = proposal.vertexOrNull(b+1);
+	e_p = proposal.edgeOrNull(b-2);
+	e = proposal.edge(b-1);
+	e_n = proposal.edgeOrNull(b);
+	vs_reg = source.vertex(b-1)->isConnectable();
+	vt_reg = source.vertex(b)->isConnectable();
+	if(!PathVertex::connect(m_scene,
+		v_p, e_p,
+		vs, e, vt,
+		e_n, v_n,
+		vs_reg ? EArea : EDiscrete, vt_reg ? EArea : EDiscrete)) {
+		++statsConnectionFailed;
+		goto fail;
+	}
+
+	/* Cache proposal (backwards) values */
+	cacheRoughness(m_manifold, m_bwPdf);
+	m_manifold->computeTransferMatrices();
+	m_bwPdf.transferMx = m_manifold->fullG(proposal);
+
 	/* Reconstruct original end points and update the derivatives */
 	m_manifold->initEndpoints(source.vertex(c), source.vertex(c+1), source.vertex(b-1), source.vertex(b));
 	// TODO: Optimize: recompute only a and c matrix derivatives at the post-first and pre-last vertices
 	if(!m_manifold->computeDerivatives()) {
-		Log(EWarn, "Found a non-manifold reversive path: %s", source.toString().c_str());
+		Log(EWarn, "Found a non-manifold reversible path: %s", source.toString().c_str());
 		goto fail;
 	}
 
@@ -624,25 +668,11 @@ bool HalfvectorPerturbation::sampleMutation(
 		}
 	}
 
-	/* Connect the last vertex */
-	statsConnectionFailed.incrementBase();
-	v_p = proposal.vertexOrNull(b-2);
-	vs = proposal.vertex(b-1);
-	vt = proposal.vertex(b);
-	v_n = proposal.vertexOrNull(b+1);
-	e_p = proposal.edgeOrNull(b-2);
-	e   = proposal.edge(b-1);
-	e_n = proposal.edgeOrNull(b);
-	vs_reg = source.vertex(b-1)->isConnectable();
-	vt_reg = source.vertex(b)->isConnectable();
-	if (!PathVertex::connect(m_scene,
-		v_p, e_p,	
-		vs,	e, vt,
-		e_n, v_n,
-		vs_reg ? EArea : EDiscrete, vt_reg ? EArea : EDiscrete)) {
-		++statsConnectionFailed;
-		goto fail;
-	}
+	/* Cache proposal (backwards) breakups */
+	computeBreakupProbabilities(proposal);
+	m_bwPdf.breakupPdf = 1.f;
+	if(m_breakupPmf.getSum() != 0.f)
+		m_bwPdf.breakupPdf = m_breakupPmf[b-2];
 
 	/* Always update pixel position */
 	proposal.vertex(k-1)->updateSamplePosition(proposal.vertex(k-2));
@@ -659,15 +689,13 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 	const int k = proposal.length();
 	Spectrum weight = Spectrum(1.0); // Always 1, since we regenerate there is no fixed subpath
 	Float lumWeight = 0.f;
-
 	const int a = muRec.extra[0], b = muRec.extra[1], c = muRec.extra[2];
 	const int numConstraints = b-c-1;
 	
-	/* Compute breakup probability */
-	// TODO: optimize/cache that for cur->prop
-	computeBreakupProbabilities(proposal);
-	if(a != b && m_breakupPmf.getSum() != 0.f)
-		weight *= m_breakupPmf[b-2];
+	const CachedTransitionPdf& cachedPdf = (&source == m_current) ? m_bwPdf : m_fwPdf;
+
+	/* Account for breakup probability */
+	weight *= cachedPdf.breakupPdf;
 
 	/* Light endpoint perturbation probability */
 	if(source.vertex(0)->isConnectable() && source.vertex(1)->isConnectable()) {
@@ -721,10 +749,7 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 
 	/* Compute the simplified measurement contribution function in half-vector space */
 	{
-		// TODO: optimize/cache computation of roughness (extract it)
-		bool success = m_manifold->init(proposal, c, b);
-		BDAssert(success);
-		const Float totalRoughness = computeTotalRoughness(&m_manifold->vertex(1), numConstraints);
+		const Float totalRoughness = cachedPdf.totalRoughness;
 		const bool fullHSLT = true;//b == a;
 		
 		for(int i=c;i<=a;++i) {
@@ -784,12 +809,10 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 			/* Skip fixed end points of the path */
 			if(i > c && i < b)
 			{
-				const PathManifold::SimpleVertex& vm = m_manifold->vertex(i-c);
-				BDAssert(vm.object == v->getIntersection().getBSDF());
-				
 				const int j = i-c-1; // constraint index
-				BDAssert(v->isOnSurface());
-				const Float stepsize = computeStepsize(vm.roughness);
+
+				const Float roughness = cachedPdf.vtxRoughtness[j];
+				const Float stepsize = computeStepsize(roughness);
 				// shorthands to half vecs:
 				Vector2 h, th;
 				if (&source == m_current) {
@@ -812,7 +835,7 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 				const Vector2 dh = th - h;
 				Matrix2x2 Rinv;
 				m_halfvectorDifferentials[j].R.transpose(Rinv); // rotation matrix. also no Jacobian due to this.
-				const Float rdWeight = vm.roughness / totalRoughness;
+				const Float rdWeight = roughness / totalRoughness;
 				const Vector2 d = Rinv * dh; // distance aligned with main axes of ray differential ellipse in half vector plane/plane space
 				const Float stdv0 = min(m_halfvectorDifferentials[j].v.x * rdWeight, stepsize);
 				const Float stdv1 = min(m_halfvectorDifferentials[j].v.y * rdWeight, stepsize);
@@ -823,17 +846,9 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 			}
 			BDAssert(weight == weight);
 		}
-		
-		// TODO: Optimize.
+
 		/* Transform the probability from half-vector space to object area measure for segment b-c */
-		{
-			success = m_manifold->computeDerivatives();
-			BDAssert(success);
-			success = m_manifold->computeTransferMatrices();
-			BDAssert(success);
-			const Float jacobian = m_manifold->fullG(proposal);
-			weight *= jacobian;
-		}
+		weight *= cachedPdf.transferMx;
 	}
 
 	lumWeight = weight.getLuminance();
