@@ -682,15 +682,6 @@ void TriMesh::computeNormals(bool force) {
 
 void TriMesh::computeUVTangents() {
 	// int degenerate = 0;
-	if (!m_texcoords) {
-		bool anisotropic = hasBSDF() && m_bsdf->getType() & BSDF::EAnisotropic;
-		if (anisotropic)
-			Log(EError, "\"%s\": computeUVTangents(): texture coordinates "
-				"are required to generate tangent vectors. If you want to render with an anisotropic "
-				"material, please make sure that all associated shapes have valid texture coordinates.",
-				getName().c_str());
-		return;
-	}
 
 	if (m_tangents)
 		return;
@@ -708,29 +699,34 @@ void TriMesh::computeUVTangents() {
 			  &v1 = m_positions[idx1],
 			  &v2 = m_positions[idx2];
 
-		const Point2
-			&uv0 = m_texcoords[idx0],
-			&uv1 = m_texcoords[idx1],
-			&uv2 = m_texcoords[idx2];
-
 		Vector dP1 = v1 - v0, dP2 = v2 - v0;
-		Vector2 dUV1 = uv1 - uv0, dUV2 = uv2 - uv0;
 		Normal n = Normal(cross(dP1, dP2));
 		Float length = n.length();
-		if (length == 0) {
-			// ++degenerate;
-			continue;
-		}
 
-		Float determinant = dUV1.x * dUV2.y - dUV1.y * dUV2.x;
-		if (determinant == 0) {
-			/* The user-specified parameterization is degenerate. Pick
-			   arbitrary tangents that are perpendicular to the geometric normal */
+		if (!m_texcoords) {
 			coordinateSystem(n/length, m_tangents[i].dpdu, m_tangents[i].dpdv);
 		} else {
-			Float invDet = 1.0f / determinant;
-			m_tangents[i].dpdu = ( dUV2.y * dP1 - dUV1.y * dP2) * invDet;
-			m_tangents[i].dpdv = (-dUV2.x * dP1 + dUV1.x * dP2) * invDet;
+			const Point2
+				&uv0 = m_texcoords[idx0],
+				&uv1 = m_texcoords[idx1],
+				&uv2 = m_texcoords[idx2];
+
+			Vector2 dUV1 = uv1 - uv0, dUV2 = uv2 - uv0;
+			if (length == 0) {
+				// ++degenerate;
+				continue;
+			}
+
+			Float determinant = dUV1.x * dUV2.y - dUV1.y * dUV2.x;
+			if (determinant == 0) {
+				/* The user-specified parameterization is degenerate. Pick
+				   arbitrary tangents that are perpendicular to the geometric normal */
+				coordinateSystem(n/length, m_tangents[i].dpdu, m_tangents[i].dpdv);
+			} else {
+				Float invDet = 1.0f / determinant;
+				m_tangents[i].dpdu = ( dUV2.y * dP1 - dUV1.y * dP2) * invDet;
+				m_tangents[i].dpdv = (-dUV2.x * dP1 + dUV1.x * dP2) * invDet;
+			}
 		}
 	}
 
@@ -797,6 +793,10 @@ void TriMesh::getNormalDerivative(const Intersection &its,
 		dndu = (n1 - n0) * il; dndu -= N * dot(N, dndu);
 		dndv = (n2 - n0) * il; dndv -= N * dot(N, dndv);
 
+		if(!m_texcoords && !m_tangents)
+			return;
+
+		Vector2 duv1, duv2;
 		if (m_texcoords) {
 			/* Compute derivatives with respect to a specified texture
 			   UV parameterization.  */
@@ -805,20 +805,30 @@ void TriMesh::getNormalDerivative(const Intersection &its,
 				&uv1 = m_texcoords[idx1],
 				&uv2 = m_texcoords[idx2];
 
-			Vector2 duv1 = uv1 - uv0, duv2 = uv2 - uv0;
-
-			det = duv1.x * duv2.y - duv1.y * duv2.x;
-
-			if (det == 0) {
-				dndu = dndv = Vector(0.0f);
-				return;
-			}
-
-			invDet = 1.0f / det;
-			Vector dndu_ = ( duv2.y * dndu - duv1.y * dndv) * invDet;
-			Vector dndv_ = (-duv2.x * dndu + duv1.x * dndv) * invDet;
-			dndu = dndu_; dndv = dndv_;
+			duv1 = uv1 - uv0;
+			duv2 = uv2 - uv0;
 		}
+		else if(m_tangents) {
+			/* Compute derivatives with respect to a specified tangent frame. */
+			const Vector 
+				&ut = its.dpdu,
+				&vt = its.dpdv;
+
+			duv1 = Vector2(dot(ut, du), dot(vt, du));
+			duv2 = Vector2(dot(ut, dv), dot(vt, dv));
+		}
+
+		det = duv1.x * duv2.y - duv1.y * duv2.x;
+
+		if(det == 0) {
+			dndu = dndv = Vector(0.0f);
+			return;
+		}
+
+		invDet = 1.0f / det;
+		Vector dndu_ = (duv2.y * dndu - duv1.y * dndv) * invDet;
+		Vector dndv_ = (-duv2.x * dndu + duv1.x * dndv) * invDet;
+		dndu = dndu_; dndv = dndv_;
 	}
 }
 
