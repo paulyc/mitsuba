@@ -25,20 +25,29 @@
 
 MTS_NAMESPACE_BEGIN
 
-struct CachedTransitionPdf
-{
-	Float breakupPdf;
-	Float transferMx;
-	Float totalRoughness;
-	std::vector<Float> vtxRoughtness;
-};
-
 /**
  * \brief Glossy half-vector space perturbation strategy
  *
  * \ingroup libbidir
  */
 class MTS_EXPORT_BIDIR HalfvectorPerturbation : public MutatorBase {
+public:
+    // Protected declarations
+    struct HalfVectorDifferential {
+        Matrix2x2 R; // rotation matrix (det = 1) in plane/plane space
+        Vector2   v; // eigenvalues
+    };
+    typedef std::vector<HalfVectorDifferential> vector_rd;
+
+    struct CachedTransitionPdf
+    {
+        Float breakupPdf;
+        Float transferMx;
+        Float totalRoughness;
+        std::vector<Float> vtxRoughtness;
+        vector_rd halfvectorDifferentials;
+    };
+
 public:
 	/**
 	 * \brief Construct a new half-vector space perturbation strategy
@@ -74,7 +83,7 @@ protected:
 	virtual ~HalfvectorPerturbation();
 
 	// Strategy deciding-routines
-	bool computeBreakupProbabilities(const Path& path) const;
+	bool computeBreakupProbabilities(const Path& path, vector_rd& rayDiffs) const;
 	bool sampleSubpath(const Path& source, int& a, int& b, int& c);
 	
 	// Perturbations
@@ -82,18 +91,12 @@ protected:
 	bool perturbLensSubpath(const Path& source, Path& proposal, const int a, const int b);
 	bool perturbHalfvectors(vector_hv& hs, const Path& source, const int b, const int c);
 public:
-	struct HalfVectorDifferential {
-		Matrix2x2 R; // rotation matrix (det = 1) in plane/plane space
-		Vector2   v; // eigenvalues
-	};
-
 	CachedTransitionPdf m_fwPdf, m_bwPdf;
   
 	const Float	m_probFactor;	// Used for perturbing end points
 	mutable ref<PathManifold> m_manifold;
 	mutable DiscreteDistribution m_breakupPmf;
 	mutable RayDifferential m_rayDifferential;
-	mutable std::vector<HalfVectorDifferential> m_halfvectorDifferentials;
 	vector_hv m_h_orig;
 	vector_hv m_h_perturbed;
 	Path *m_current;

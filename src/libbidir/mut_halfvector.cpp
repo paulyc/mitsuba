@@ -101,6 +101,22 @@ void filloutConstraintMatrix(PathManifold &manifold, Eigen::MatrixXd& A)
 }
 #endif
 
+static inline Float computeStepsize(const Float roughness) {
+    return /*std::sqrt*/(roughness * (Float)(0.797884560802865356)); /* sqrt(2/M_PI) ~= 0.7978.. */
+}
+
+static inline void cacheRoughness(const ref<PathManifold>& m, HalfvectorPerturbation::CachedTransitionPdf& cachedPdf) {
+    const int numConstraints = (int)m->size() - 2;
+    cachedPdf.vtxRoughtness.resize(numConstraints);
+    cachedPdf.totalRoughness = 0;
+    for(int j = 0;j<numConstraints;++j)
+    {
+        const Float roughness = m->vertex(j+1).roughness;
+        cachedPdf.vtxRoughtness[j] = roughness;
+        cachedPdf.totalRoughness += roughness;
+    }
+}
+
 static inline Float nonspecularProb(Float alpha, const Vector& h, const Point2& img_sample, Vector2 dh_du, Vector2 dh_dv, const Vector2& meanImageJump) {
 	if (alpha == std::numeric_limits<Float>::infinity() || h.z == 0.f)
 		return 1.f;
@@ -159,10 +175,12 @@ static inline Float nonspecularProb(Float alpha, const Vector& h, const Point2& 
 	return a;
 }
 
-bool HalfvectorPerturbation::computeBreakupProbabilities(const Path& path) const {
+bool HalfvectorPerturbation::computeBreakupProbabilities(const Path& path, vector_rd& rayDiffs) const {
 	const int k = path.length();
 	const int numConstraints = k - 3;
 	m_breakupPmf.clear();
+
+    const bool fullHSLT = true;//source.length() == numConstraints + 3;
 
 	/* Compute all derivatives along the path */
 	m_manifold->init(path, 1, k);
@@ -197,7 +215,7 @@ bool HalfvectorPerturbation::computeBreakupProbabilities(const Path& path) const
 	Vector2 dv2_du(its.dudx, its.dvdx);
 	Vector2 dv2_dv(its.dudy, its.dvdy);
 
-	m_halfvectorDifferentials.resize(numConstraints);
+	rayDiffs.resize(numConstraints);
 	// based on LU decomposition:
 	const int n = numConstraints+1; // last vertex
 
@@ -313,7 +331,7 @@ bool HalfvectorPerturbation::computeBreakupProbabilities(const Path& path) const
 		BDAssert(cos_phi == cos_phi);
 
 		// write back new rotation matrix (= U')
-		m_halfvectorDifferentials[hi-1].R = Matrix2x2(
+		rayDiffs[hi-1].R = Matrix2x2(
 			cos_phi,  sin_phi,
 			-sin_phi, cos_phi);
 
@@ -321,19 +339,25 @@ bool HalfvectorPerturbation::computeBreakupProbabilities(const Path& path) const
 		const Float Su_sum = Su(0,0) + Su(1,1);
 		const Float Su_dif = math::safe_sqrt((Su(0,0)-Su(1,1))*(Su(0,0)-Su(1,1)) + 4.0f*Su(0,1)*Su(1,0));
 		// now the two axes will have anisotropic step lengths:
-		m_halfvectorDifferentials[hi-1].v = Vector2(
+		rayDiffs[hi-1].v = Vector2(
 			sqrt(max(Float(1e-25), (Su_sum + Su_dif)*Float(0.5))),
 			sqrt(max(Float(1e-25), (Su_sum - Su_dif)*Float(0.5))));
 		
 		/* Compute the break-up probabilities */
-		const Vector2 dh_du = m_halfvectorDifferentials[hi-1].R * Vector2(m_halfvectorDifferentials[hi-1].v.x, 0.f),
-				      dh_dv = m_halfvectorDifferentials[hi-1].R * Vector2(0.f, m_halfvectorDifferentials[hi-1].v.y);
+		const Vector2 dh_du = rayDiffs[hi-1].R * Vector2(rayDiffs[hi-1].v.x, 0.f),
+				      dh_dv = rayDiffs[hi-1].R * Vector2(0.f, rayDiffs[hi-1].v.y);
 		// used to decide which vertex to break up the path into lens subchain (a,b) and
 		// half vector perturbation sub chain (b,c):
 		const Point2 smpPos(vs->getSamplePosition().x / imageRes.x, vs->getSamplePosition().y / imageRes.y);
 		const Float p = nonspecularProb(m_manifold->vertex(hi).roughness, m_manifold->vertex(hi).m, smpPos, dh_du, dh_dv, meanImageJump);
 		m_breakupPmf.append(p);
 		breakup_sum += p;
+
+        ///* Do not use ray differentials in case of partial HSLT */
+        //if(!fullHSLT) {
+        //    rayDiffs[hi-1].v = Vector2(1e30f, 1e30f);
+        //    rayDiffs[hi-1].R.setIdentity();
+        //}
 	}
 	
 	/* Add the expected HSLT probability: sample a vertex, then p_hslt = 1 - p_vtx */
@@ -358,7 +382,7 @@ bool HalfvectorPerturbation::sampleSubpath(const Path& path, int& a, int& b, int
 	const int numVerts = k+1;
 	
 	/* Compute ray differentials in half-vector space */
-	if(!computeBreakupProbabilities(path))
+	if(!computeBreakupProbabilities(path, m_fwPdf.halfvectorDifferentials))
 		return false;
 	BDAssert(m_breakupPmf.getSum() > 0.f);
 	
@@ -468,43 +492,16 @@ bool HalfvectorPerturbation::perturbLensSubpath(const Path& source, Path& propos
 	return true;
 }
 
-static inline Float computeStepsize(const Float roughness) {
-	return /*std::sqrt*/(roughness * (Float)(0.797884560802865356)); /* sqrt(2/M_PI) ~= 0.7978.. */
-}
-
-static inline Float computeTotalRoughness(const PathManifold::SimpleVertex *v, const int numConstraints) {
-	Float totalRoughness = 0;
-	for(int j = 0;j<numConstraints;++j)
-		totalRoughness += v[j].roughness;
-	return totalRoughness;
-}
-
-static inline void cacheRoughness(const ref<PathManifold>& m, CachedTransitionPdf& cachedPdf) {
-	const int numConstraints = (int)m->size() - 2;
-	cachedPdf.vtxRoughtness.resize(numConstraints);
-	for(int j = 0;j<numConstraints;++j)
-		cachedPdf.vtxRoughtness[j] = m->vertex(j+1).roughness;
-	cachedPdf.totalRoughness = computeTotalRoughness(&m->vertex(1), numConstraints);
-}
-
 bool HalfvectorPerturbation::perturbHalfvectors(vector_hv& hs, const Path& source, const int b, const int c) {
 	const int numConstraints = (int)hs.size();
 	BDAssert(m_manifold->size()-2 == (uint64_t)numConstraints);
 	
 	/* Scale dependent on the distribution of roughness along the path */
-	const Float totalRoughness = computeTotalRoughness(&m_manifold->vertex(1), numConstraints);
-	
-	const bool fullHSLT = true;//source.length() == numConstraints + 3;
+	const Float totalRoughness = m_fwPdf.totalRoughness;
 	
 	/* Perturb half-vector constraints */
 	for(int j=0;j<numConstraints;++j) {
 		const PathManifold::SimpleVertex& vm = m_manifold->vertex(j+1);
-		
-		/* Do not use ray differentials in case of partial HSLT */
-		if(!fullHSLT) {
-			m_halfvectorDifferentials[j].v = Vector2(1e30f, 1e30f);
-			m_halfvectorDifferentials[j].R.setIdentity();
-		}
 		
 		/* Reset to 0 to avoid accumulated drift from previous mutations */
 		if(vm.degenerate) {
@@ -515,11 +512,11 @@ bool HalfvectorPerturbation::perturbHalfvectors(vector_hv& hs, const Path& sourc
 #if 1
 		const Float stepsize = computeStepsize(vm.roughness);
 		const Float rdWeight = vm.roughness / totalRoughness;
-		const Float stdv0 = min(m_halfvectorDifferentials[j].v.x * rdWeight, stepsize);
-		const Float stdv1 = min(m_halfvectorDifferentials[j].v.y * rdWeight, stepsize);
+		const Float stdv0 = min(m_fwPdf.halfvectorDifferentials[j].v.x * rdWeight, stepsize);
+		const Float stdv1 = min(m_fwPdf.halfvectorDifferentials[j].v.y * rdWeight, stepsize);
 		Point2 g = warp::squareToStdNormal(m_sampler->next2D());
 		Vector2 d(g.x * stdv0, g.y * stdv1);
-		hs[j] += m_halfvectorDifferentials[j].R * d;
+		hs[j] += m_fwPdf.halfvectorDifferentials[j].R * d;
 #else
 		/* DEBUG: Constant jump sizes */
 		const Float r2 = 0.005f;
@@ -668,8 +665,8 @@ bool HalfvectorPerturbation::sampleMutation(
 		}
 	}
 
-	/* Cache proposal (backwards) breakups */
-	computeBreakupProbabilities(proposal);
+	/* Cache proposal (backwards) breakups and ray differentials */
+	computeBreakupProbabilities(proposal, m_bwPdf.halfvectorDifferentials);
 	m_bwPdf.breakupPdf = 1.f;
 	if(m_breakupPmf.getSum() != 0.f)
 		m_bwPdf.breakupPdf = m_breakupPmf[b-2];
@@ -688,11 +685,10 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 		const MutationRecord &muRec) const {
 	const int k = proposal.length();
 	Spectrum weight = Spectrum(1.0); // Always 1, since we regenerate there is no fixed subpath
-	Float lumWeight = 0.f;
 	const int a = muRec.extra[0], b = muRec.extra[1], c = muRec.extra[2];
 	const int numConstraints = b-c-1;
 	
-	const CachedTransitionPdf& cachedPdf = (&source == m_current) ? m_bwPdf : m_fwPdf;
+    const CachedTransitionPdf& cachedPdf = (&source == m_current) ? m_bwPdf : m_fwPdf;
 
 	/* Account for breakup probability */
 	weight *= cachedPdf.breakupPdf;
@@ -750,7 +746,6 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 	/* Compute the simplified measurement contribution function in half-vector space */
 	{
 		const Float totalRoughness = cachedPdf.totalRoughness;
-		const bool fullHSLT = true;//b == a;
 		
 		for(int i=c;i<=a;++i) {
 			const PathVertex* vp = proposal.vertex(i-1);
@@ -818,28 +813,22 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 				if (&source == m_current) {
 					// would need to divide out forward transition probability current -> tentative T(c->t).
 					// ray diff is around proposal, so we can only evaluate T(t->c) here, which we need to multiply.
-					h  = Vector2(m_h_orig[j].x, m_h_orig[j].y);
-					th = Vector2(m_h_perturbed[j].x, m_h_perturbed[j].y);
+					h  = m_h_orig[j];
+					th = m_h_perturbed[j];
 				} else {
-					th = Vector2(m_h_orig[j].x, m_h_orig[j].y);
-					h  = Vector2(m_h_perturbed[j].x, m_h_perturbed[j].y);
-				}
-				
-				/* Do not use ray differentials in case of partial HSLT */
-				if(!fullHSLT) {
-					m_halfvectorDifferentials[j].v = Vector2(1e30f, 1e30f);
-					m_halfvectorDifferentials[j].R.setIdentity();
+                    h = m_h_perturbed[j];
+                    th = m_h_orig[j];
 				}
 				
 				// eval Gaussian:
 				const Vector2 dh = th - h;
 				Matrix2x2 Rinv;
-				m_halfvectorDifferentials[j].R.transpose(Rinv); // rotation matrix. also no Jacobian due to this.
+				cachedPdf.halfvectorDifferentials[j].R.transpose(Rinv); // rotation matrix. also no Jacobian due to this.
 				const Float rdWeight = roughness / totalRoughness;
 				const Vector2 d = Rinv * dh; // distance aligned with main axes of ray differential ellipse in half vector plane/plane space
-				const Float stdv0 = min(m_halfvectorDifferentials[j].v.x * rdWeight, stepsize);
-				const Float stdv1 = min(m_halfvectorDifferentials[j].v.y * rdWeight, stepsize);
-				const Float gauss = 1.0f/(2.0f*M_PI * stdv0*stdv1) * std::exp(-0.5f * (d.x*d.x/(stdv0*stdv0) + d.y*d.y/(stdv1*stdv1)));
+				const Float stdv0 = min(cachedPdf.halfvectorDifferentials[j].v.x * rdWeight, stepsize);
+				const Float stdv1 = min(cachedPdf.halfvectorDifferentials[j].v.y * rdWeight, stepsize);
+				const Float gauss = 1.0f/(2.0f*M_PI * stdv0*stdv1) * math::fastexp(-0.5f * (d.x*d.x/(stdv0*stdv0) + d.y*d.y/(stdv1*stdv1)));
 				if(gauss < RCPOVERFLOW)
 					goto q_failed;
 				weight *= gauss;
@@ -851,7 +840,7 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 		weight *= cachedPdf.transferMx;
 	}
 
-	lumWeight = weight.getLuminance();
+	Float lumWeight = weight.getLuminance();
 	BDAssert(lumWeight >= 0 && (lumWeight == lumWeight));
 	if (lumWeight <= RCPOVERFLOW)
 		goto q_failed;
