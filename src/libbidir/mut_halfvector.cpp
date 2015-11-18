@@ -801,32 +801,23 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 				weight *= abs(do_dh);
 			}
 			
-			/* Now account for perturbation probabilities */
-			/* Skip fixed end points of the path */
+			/* Now account for perturbation probability. Skip fixed end points of the path */
 			if(i > c && i < b)
 			{
-				const int j = i-c-1; // constraint index
+                const int j = i-c-1; // Constraint index
+                /* Shorthands to half vectors. The order does not matter, since we evaluate Gaussian in the end. */
+                const Vector2 h = m_h_orig[j], th = m_h_perturbed[j];
+                const Vector2 dh = th - h;
 
-				const Float roughness = cachedPdf.vtxRoughtness[j];
-				const Float stepsize = computeStepsize(roughness);
-				// shorthands to half vecs:
-				Vector2 h, th;
-				if (&source == m_current) {
-					// would need to divide out forward transition probability current -> tentative T(c->t).
-					// ray diff is around proposal, so we can only evaluate T(t->c) here, which we need to multiply.
-					h  = m_h_orig[j];
-					th = m_h_perturbed[j];
-				} else {
-                    h = m_h_perturbed[j];
-                    th = m_h_orig[j];
-				}
-				
-				// eval Gaussian:
-				const Vector2 dh = th - h;
+                /* Would need to divide out forward transition probability current -> tentative T(c->t).
+                   ray differential is around proposal, so we can only evaluate T(t->c) here, which we need to multiply.
+				   Evaluate Gaussian proposal in half-vector ray differential space */
 				Matrix2x2 Rinv;
-				cachedPdf.halfvectorDifferentials[j].R.transpose(Rinv); // rotation matrix. also no Jacobian due to this.
+				cachedPdf.halfvectorDifferentials[j].R.transpose(Rinv); // Rotation matrix, also no Jacobian due to this.
+                const Float roughness = cachedPdf.vtxRoughtness[j];
+                const Float stepsize = computeStepsize(roughness);
 				const Float rdWeight = roughness / totalRoughness;
-				const Vector2 d = Rinv * dh; // distance aligned with main axes of ray differential ellipse in half vector plane/plane space
+				const Vector2 d = Rinv * dh; // Distance aligned with main axes of ray differential ellipse in half vector plane/plane space
 				const Float stdv0 = min(cachedPdf.halfvectorDifferentials[j].v.x * rdWeight, stepsize);
 				const Float stdv1 = min(cachedPdf.halfvectorDifferentials[j].v.y * rdWeight, stepsize);
 				const Float gauss = 1.0f/(2.0f*M_PI * stdv0*stdv1) * math::fastexp(-0.5f * (d.x*d.x/(stdv0*stdv0) + d.y*d.y/(stdv1*stdv1)));
