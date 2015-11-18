@@ -665,15 +665,16 @@ bool HalfvectorPerturbation::sampleMutation(
 		}
 	}
 
-	/* Cache proposal (backwards) breakups and ray differentials */
-	computeBreakupProbabilities(proposal, m_bwPdf.halfvectorDifferentials);
-	m_bwPdf.breakupPdf = 1.f;
-	if(m_breakupPmf.getSum() != 0.f)
-		m_bwPdf.breakupPdf = m_breakupPmf[b-2];
-
-	/* Always update pixel position */
+	/* Always update pixel position BEFORE recomputing ray differentials */
 	proposal.vertex(k-1)->updateSamplePosition(proposal.vertex(k-2));
 	BDAssert(source.matchesConfiguration(proposal));
+
+    /* Cache proposal (backwards) breakups and ray differentials */
+    computeBreakupProbabilities(proposal, m_bwPdf.halfvectorDifferentials);
+    m_bwPdf.breakupPdf = 1.f;
+    if(m_breakupPmf.getSum() != 0.f)
+        m_bwPdf.breakupPdf = m_breakupPmf[b-2];
+
 	++statsGenerated;
 	return true;
 fail:
