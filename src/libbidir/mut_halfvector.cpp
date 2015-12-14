@@ -780,8 +780,12 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 					std::swap(wi, wo);
 				const Vector n = v->getShadingNormal();
 				const Vector gn = v->getGeometricNormal();
+
+                /* Retrieve a proper IoR ratio for the current interaction */
 				Float eta = v->getIntersection().getBSDF()->getEta();
-				if(dot(wi, gn) < 0)
+                if(dot(wi, n) * dot(wo, n) >= 0)
+                    eta = 1.f;
+				else if(dot(wi, n) < 0)
 					eta = 1 / eta;
 				
 				/* Compute the half vector */
