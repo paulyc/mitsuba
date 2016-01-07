@@ -223,7 +223,7 @@ public:
 
 		if (m_flipNormals)
 			its.geoFrame.n *= -1;
-		its.shFrame.n = its.geoFrame.n;
+		its.shFrame = its.geoFrame;
 		its.hasUVPartials = false;
 		its.instance = NULL;
 		its.time = ray.time;
