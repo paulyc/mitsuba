@@ -702,6 +702,10 @@ void TriMesh::computeUVTangents() {
 		Vector dP1 = v1 - v0, dP2 = v2 - v0;
 		Normal n = Normal(cross(dP1, dP2));
 		Float length = n.length();
+		if(length == 0) {
+			// ++degenerate;
+			continue;
+		}
 
 		if (!m_texcoords) {
 			coordinateSystem(n/length, m_tangents[i].dpdu, m_tangents[i].dpdv);
@@ -712,10 +716,7 @@ void TriMesh::computeUVTangents() {
 				&uv2 = m_texcoords[idx2];
 
 			Vector2 dUV1 = uv1 - uv0, dUV2 = uv2 - uv0;
-			if (length == 0) {
-				// ++degenerate;
-				continue;
-			}
+
 
 			Float determinant = dUV1.x * dUV2.y - dUV1.y * dUV2.x;
 			if (determinant == 0) {
