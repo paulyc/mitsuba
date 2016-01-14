@@ -810,7 +810,7 @@ void GLWidget::mousePressEvent(QMouseEvent *event) {
 
 		if (m_context->scene->rayIntersect(ray, its)) {
 			m_statusMessage =
-				formatString("Selected shape \"%s\"", its.shape->getName().c_str());
+				formatString("Selected shape \"%s\"\nMaterial: \"%s\"", its.shape->getName().c_str(), its.shape->getBSDF() ? its.shape->getBSDF()->getID().c_str() : "None");
 			m_statusTimer->reset();
 			m_context->selectedShape = its.instance ? its.instance : its.shape;
 			AABB aabb(m_context->selectedShape->getAABB());
