@@ -328,7 +328,7 @@ public:
 	/// Initialize with a TSpectrum data type based on a alternate representation
 	template <typename AltScalar> explicit TSpectrum(const TSpectrum<AltScalar, N> &v) {
 		for (int i=0; i<N; ++i)
-			s[i] = (Scalar) v[i];
+			s[i] = (AltScalar)v[i];
 	}
 
 	/// Add two spectral power distributions
@@ -530,6 +530,14 @@ public:
 		TSpectrum value;
 		for (int i=0; i<N; i++)
 			value.s[i] = std::pow(s[i], f);
+		return value;
+	}
+
+	/// Component-wise power
+	inline TSpectrum powSpec(TSpectrum spec) const {
+		TSpectrum value;
+		for (int i=0; i<N; i++)
+			value.s[i] = std::pow(s[i], spec[i]);
 		return value;
 	}
 

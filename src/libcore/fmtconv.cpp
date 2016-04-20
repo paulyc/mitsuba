@@ -146,7 +146,7 @@ template <typename T> struct FormatConverterImpl : public FormatConverter {
 		const SourceFormat *source = reinterpret_cast<const SourceFormat *>(_source);
 		DestFormat *dest = reinterpret_cast<DestFormat *>(_dest);
 		const Float invDestGamma = 1.0f / destGamma;
-		const size_t maxValue = (size_t) std::numeric_limits<SourceFormat>::max();
+		const size_t maxValue = std::numeric_limits<SourceFormat>::max() < float((size_t(-1))) ? (size_t)std::numeric_limits<SourceFormat>::max() : size_t(-1);
 
 		DestFormat *precomp = NULL;
 		if (format_traits<SourceFormat>::is_compact && count > maxValue) {

@@ -2222,8 +2222,8 @@ protected:
 
 					if (clippedLeft.isValid() && clippedLeft.getSurfaceArea() > 0) {
 						for (int axis=0; axis<PointType::dim; ++axis) {
-							float min = clippedLeft.min[axis],
-								  max = clippedLeft.max[axis];
+							float min = (float)clippedLeft.min[axis],
+								  max = (float)clippedLeft.max[axis];
 
 							if (min == max) {
 								*newEventsLeftEnd++ = EdgeEvent(
@@ -2244,8 +2244,8 @@ protected:
 
 					if (clippedRight.isValid() && clippedRight.getSurfaceArea() > 0) {
 						for (int axis=0; axis<PointType::dim; ++axis) {
-							float min = clippedRight.min[axis],
-								  max = clippedRight.max[axis];
+							float min = (float)clippedRight.min[axis],
+								  max = (float)clippedRight.max[axis];
 
 							if (min == max) {
 								*newEventsRightEnd++ = EdgeEvent(
