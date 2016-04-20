@@ -689,10 +689,11 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 	const int a = muRec.extra[0], b = muRec.extra[1], c = muRec.extra[2];
 	const int numConstraints = b-c-1;
 	
-    const CachedTransitionPdf& cachedPdf = (&source == m_current) ? m_bwPdf : m_fwPdf;
+	const CachedTransitionPdf& cachedPdf = (&source == m_current) ? m_bwPdf : m_fwPdf;
 
 	/* Account for breakup probability */
 	weight *= cachedPdf.breakupPdf;
+	Float lumWeight = 0.;
 
 	/* Light endpoint perturbation probability */
 	if(source.vertex(0)->isConnectable() && source.vertex(1)->isConnectable()) {
@@ -836,7 +837,7 @@ Float HalfvectorPerturbation::Q(const Path &source, const Path &proposal,
 		weight *= cachedPdf.transferMx;
 	}
 
-	Float lumWeight = weight.getLuminance();
+	lumWeight = weight.getLuminance();
 	BDAssert(lumWeight >= 0 && (lumWeight == lumWeight));
 	if (lumWeight <= RCPOVERFLOW)
 		goto q_failed;
