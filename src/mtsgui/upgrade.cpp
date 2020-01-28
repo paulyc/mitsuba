@@ -15,7 +15,9 @@
     You should have received a copy of the GNU General Public License
     along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
+#define QT_WARNING_PUSH
+#define QT_WARNING_POP
+#define QT_WARNING_DISABLE_GCC(x)
 #include "upgrade.h"
 #include "save.h"
 #include <mitsuba/core/fresolver.h>

@@ -2,6 +2,9 @@
 # Tested only on Windows and Linux (Ubuntu 10.10)
 cmake_minimum_required(VERSION 2.8.3 FATAL_ERROR)
 
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DBOOST_ALL_NO_LIB=0 -I/usr/include/glew-1.13.0")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBOOST_ALL_NO_LIB=0 -I/usr/include/glew-1.13.0")
+
 # Internal variable to know whether this is the first time CMake runs
 if (NOT DEFINED MTS_CMAKE_INIT)
   set(MTS_CMAKE_INIT ON CACHE INTERNAL "Is this the initial CMake run?")
@@ -140,6 +143,8 @@ else()
 endif()
 
 # Build the Qt-based GUI binaries
+set(BUILD_GUI 1)
+set(QT4_FOUND 1)
 if (BUILD_GUI)
   add_subdirectory(src/mtsgui)
 elseif(NOT QT4_FOUND)
