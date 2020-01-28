@@ -21,7 +21,7 @@
 #define __MITSUBA_CORE_PLATFORM_H_
 
 /// Disable BOOST's autolinking feature
-#define BOOST_ALL_NO_LIB 1
+#define BOOST_ALL_NO_LIB 0
 
 #if !defined(_OPENMP) && !defined(MTS_NO_OPENMP)
 	#define MTS_NO_OPENMP
