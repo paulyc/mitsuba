@@ -15,7 +15,7 @@
     You should have received a copy of the GNU General Public License
     along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-
+#define ADT_WORKAROUND 1
 #include <mitsuba/render/trimesh.h>
 #include <mitsuba/core/fresolver.h>
 #include <mitsuba/core/properties.h>

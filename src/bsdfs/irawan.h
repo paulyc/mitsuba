@@ -302,6 +302,8 @@ template <typename Iterator> struct YarnGrammar : qi::grammar<Iterator, Yarn(), 
 		using qi::_1;
 		using qi::_2;
 		using qi::_3;
+		Spectrum (Properties::*getSpectrum)(const std::string&) const = &Properties::getSpectrum;
+		Float (Properties::*getFloat)(const std::string&) const = &Properties::getFloat;
 
 		type = (qi::string("warp") | qi::string("weft"))
 			[ ph::if_else(_1 == "warp", _val = Yarn::EWarp, _val = Yarn::EWeft ) ];
@@ -311,10 +313,10 @@ template <typename Iterator> struct YarnGrammar : qi::grammar<Iterator, Yarn(), 
 
 		spec = ((lit("{") >> Float_ >> lit(",") >> Float_ >> lit(",") >> Float_ >> lit("}")) 
 					[ ph::bind(&Spectrum::fromLinearRGB, _val, _1, _2, _3, Spectrum::EReflectance) ])
-		     | (identifier [ _val = ph::bind(&Properties::getSpectrum, ph::ref(props), _1)]);
+		     | (identifier [ _val = ph::bind(getSpectrum, ph::ref(props), _1)]);
 
 		flt = (Float_ [ _val = _1 ])
-		    | (identifier [ _val = ph::bind(&Properties::getFloat, ph::ref(props), _1)]);
+		    | (identifier [ _val = ph::bind(getFloat, ph::ref(props), _1)]);
 
 		start = lit("yarn")
 			>> lit("{")
@@ -353,6 +355,7 @@ template <typename Iterator> struct WeavePatternGrammar : qi::grammar<Iterator, 
 		using qi::_val;
 		using qi::_1;
 		using ph::push_back;
+		Float (Properties::*getFloat)(const std::string&) const = &Properties::getFloat;
 
 		pattern = lit("pattern") >> lit("{")
 				>> uint_ [ push_back(_val, _1) ] % ','
@@ -364,7 +367,7 @@ template <typename Iterator> struct WeavePatternGrammar : qi::grammar<Iterator, 
 			>> *(qi::alnum | char_('_')) ];
 
 		flt = (Float_ [ _val = _1 ])
-		      | (identifier [ _val = ph::bind(&Properties::getFloat, ph::ref(props), _1)]);
+		      | (identifier [ _val = ph::bind(getFloat, ph::ref(props), _1)]);
 
 		start = lit("weave") >> lit("{") >> (
 			  lit("name")               >> lit("=") >> name   [ ph::bind(&WeavePattern::name,               _val) = _1  ]
