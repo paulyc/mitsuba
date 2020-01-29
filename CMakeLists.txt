@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 2.8.3 FATAL_ERROR)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DBOOST_ALL_NO_LIB=0 -I/usr/include/glew-1.13.0")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBOOST_ALL_NO_LIB=0 -I/usr/include/glew-1.13.0")
+set(CMAKE_INSTALL_PREFIX /usr/local)
 
 # Internal variable to know whether this is the first time CMake runs
 if (NOT DEFINED MTS_CMAKE_INIT)
